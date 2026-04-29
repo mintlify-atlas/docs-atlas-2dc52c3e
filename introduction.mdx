@@ -1,0 +1,71 @@
+---
+title: "What is nvitop? Features, requirements, and comparisons"
+description: "nvitop is an interactive NVIDIA-GPU process viewer. Learn its key features, system requirements, and how it compares to nvidia-smi, nvtop, and gpustat."
+---
+
+nvitop is an interactive NVIDIA device and process monitoring tool that goes far beyond what `nvidia-smi` provides. Where `nvidia-smi` prints a static snapshot, nvitop runs as a live resource monitor with a colorful terminal interface, real-time bar charts and history graphs, keyboard- and mouse-driven process management, and a rich Python API you can import directly into your own scripts. Unlike C-based alternatives such as `nvtop`, nvitop is written in pure Python, ships on PyPI and conda-forge, and works on both Linux and Windows.
+
+## Key features
+
+- **Colorful, informative TUI** — shows more detail than `nvidia-smi` with fancy box-drawing characters and color-coded utilization levels.
+- **Monitor mode** — continuously updates GPU and process status with bar charts, history graphs, sortable process lists, and mouse support.
+- **Process management** — send `SIGINT`, `SIGTERM`, or `SIGKILL` to selected processes directly from the keyboard; inspect process trees and environment variables without leaving the interface.
+- **Python API** — query device status, collect resource metrics, and build custom monitoring tools using the `nvitop` package.
+- **`nvisel` device selector** — automatically picks the best available GPUs for a training job based on free memory and utilization constraints.
+- **Prometheus exporter** — `nvitop-exporter` exposes GPU metrics for collection by Prometheus and visualization on a Grafana dashboard.
+- **Efficient queries** — calls the NVML Python bindings directly instead of parsing `nvidia-smi` output, and caches results with a TTL cache to minimize driver overhead.
+- **Windows support** — works on Windows through the `windows-curses` package using PDCurses.
+
+## Requirements
+
+nvitop requires the following to run:
+
+| Requirement | Details |
+|---|---|
+| Python | 3.8 or later |
+| NVIDIA Management Library (NVML) | Ships with the NVIDIA display driver |
+| `nvidia-ml-py` | Python bindings for NVML (`>= 11.450.51, < 13.596.0`) |
+| `psutil` | Cross-platform host process information (`>= 5.6.6`) |
+| `curses` | Built into Python on Linux/macOS; provided by `windows-curses` on Windows |
+
+<Note>
+  NVML is bundled with the NVIDIA display driver. You can download the driver from the [NVIDIA Driver Downloads](https://www.nvidia.com/Download/index.aspx) page, or install it as part of the [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads). No separate NVML installation is needed if you already have an NVIDIA driver installed.
+</Note>
+
+<Warning>
+  On Windows, `nvitop` relies on `windows-curses` (installed automatically as a dependency). Terminal behavior may differ across emulators — in particular, mouse support is not guaranteed on all Windows terminals.
+</Warning>
+
+## How nvitop compares
+
+| Tool | Static output | Live monitor | Python API | Pure Python | Windows |
+|---|---|---|---|---|---|
+| `nvidia-smi` | Yes | No | No | No | Yes |
+| `nvtop` | No | Yes | No | No | No |
+| `gpustat` | Yes | No | No | Yes | Partial |
+| **nvitop** | Yes (`-1`) | Yes | Yes | Yes | Yes |
+
+nvitop queries NVML directly (like `nvidia-smi`) but also maintains a live TUI (like `nvtop`), exposes a Python API (unlike both), and runs everywhere Python 3.8+ does.
+
+## Where to go next
+
+<CardGroup cols={3}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install via pip, conda, uvx, or pipx
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run the monitor and write your first API script
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/cli/nvitop">
+    All command-line options and environment variables
+  </Card>
+  <Card title="nvisel" icon="sliders" href="/cli/nvisel">
+    Automatic GPU selection for training jobs
+  </Card>
+  <Card title="Python API" icon="code" href="/api/overview">
+    Device, Process, and collector API reference
+  </Card>
+  <Card title="Prometheus & Grafana" icon="gauge" href="/guides/prometheus-grafana">
+    Export and visualize GPU metrics at scale
+  </Card>
+</CardGroup>

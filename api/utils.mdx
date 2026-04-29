@@ -1,0 +1,343 @@
+---
+title: "Utilities API — nvitop NA, Snapshot, and Formatters"
+description: "Reference for nvitop's utility layer: the NA sentinel, Snapshot class, binary size constants, human-readable formatting functions, and ttl_cache."
+---
+
+The utils module provides the building blocks used throughout the rest of the nvitop API. Most of these symbols are re-exported from the top-level `nvitop` namespace so you rarely need to import them from `nvitop.api.utils` directly.
+
+---
+
+## NA — the not-applicable sentinel
+
+```python
+NA: NaType   # singleton, value == 'N/A'
+```
+
+`NA` is a singleton instance of `NaType`, a `str` subclass. It appears wherever a query returns no meaningful value — for example, when a GPU does not expose a particular sensor, or when a process has already terminated.
+
+`NA` behaves like the string `'N/A'` for all string operations, and like `math.nan` for all numeric operations.
+
+```python
+from nvitop import NA
+
+# String behaviour
+f'memory usage: {NA}'     # 'memory usage: N/A'
+NA.lower()                 # 'n/a'
+NA.ljust(5)                # 'N/A  '
+
+# Numeric behaviour
+float(NA)                  # nan
+NA + 1                     # nan
+NA * 1024                  # nan
+NA / (1024 * 1024)         # nan
+
+# Truthiness
+bool(NA)                   # False
+int(NA)                    # 0
+```
+
+<Tip>
+Check for missing values with `value != 'N/A'` or `value is not NA`. It is always safe to call `float(value)` on a numeric-or-NA result — `NA` converts to `math.nan` without raising.
+</Tip>
+
+### NaType
+
+```python
+@final
+class NaType(str):
+    def __new__(cls) -> NaType: ...   # singleton
+```
+
+`NA` is always greater than any number in comparisons, which means you can safely sort device lists by a metric that may return `NA` without special-casing:
+
+```python
+devices_by_used = sorted(Device.all(), key=Device.memory_used, reverse=True)
+```
+
+### NotApplicable / NotApplicableType
+
+`NotApplicable` is an alias for `NA` and `NotApplicableType` is an alias for `NaType`. Provided for backward compatibility.
+
+---
+
+## Snapshot
+
+```python
+class Snapshot:
+    def __init__(self, real: Any, **items: Any) -> None: ...
+```
+
+A dict-like container that stores a frozen view of an object's attributes at a point in time. Device and process `.as_snapshot()` methods return `Snapshot` instances.
+
+### Access patterns
+
+```python
+snap = device.as_snapshot()
+
+# Attribute access
+snap.memory_used        # int
+
+# Item access
+snap['memory_info']     # MemoryInfo named tuple
+
+# Lazy fallback — if an attribute was not captured at snapshot time,
+# Snapshot calls it on the original `real` object automatically
+snap.bar1_memory_info   # fetched from device on demand
+
+# Iteration — yields attribute names (excludes 'real' and 'timestamp')
+list(snap)
+
+# Dict conversion
+d = dict(snap)
+# or
+d = {**snap}
+```
+
+<ResponseField name="real" type="Any">
+  Reference to the original live object (Device, GpuProcess, or HostProcess).
+</ResponseField>
+
+<ResponseField name="timestamp" type="float">
+  Unix epoch time at which the snapshot was taken.
+</ResponseField>
+
+---
+
+## Size constants
+
+Binary-prefix size constants for computing and converting byte values:
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `KiB` | `1 << 10` = 1 024 | Kibibyte |
+| `MiB` | `1 << 20` = 1 048 576 | Mebibyte |
+| `GiB` | `1 << 30` = 1 073 741 824 | Gibibyte |
+| `TiB` | `1 << 40` | Tebibyte |
+| `PiB` | `1 << 50` | Pebibyte |
+
+```python
+from nvitop import MiB, GiB
+
+memory_in_mib = memory_bytes / MiB
+threshold_bytes = 8 * GiB
+```
+
+`SIZE_UNITS` is a dict mapping unit name strings (including SI variants such as `'MB'`, `'GB'`) to their byte multiplier.
+
+---
+
+## bytes2human
+
+```python
+def bytes2human(
+    b: int | float | NaType,
+    /,
+    *,
+    min_unit: int = 1,
+) -> str: ...
+```
+
+Converts a byte count to a compact human-readable string. The unit is chosen automatically based on magnitude.
+
+<ParamField path="b" type="int | float | NaType" required>
+  Byte count to format. Returns `NA` unchanged if `b is NA`.
+</ParamField>
+
+<ParamField path="min_unit" type="int" default="1">
+  Minimum unit size in bytes. Pass `MiB` to suppress `KiB` output and always show at least MiB precision.
+</ParamField>
+
+```python
+from nvitop import bytes2human, MiB
+
+bytes2human(500)              # '500B'
+bytes2human(10_240)           # '10KiB'
+bytes2human(1_048_576)        # '1.00MiB'
+bytes2human(11_554_717_696)   # '11019MiB'
+bytes2human(107_374_182_400)  # '100.00GiB'
+```
+
+---
+
+## human2bytes
+
+```python
+def human2bytes(s: int | str, /) -> int: ...
+```
+
+Converts a human-readable size string (case-insensitive) to a byte count. Supports both binary (`KiB`, `MiB`, `GiB`) and SI (`KB`, `MB`, `GB`) suffixes.
+
+Raises `ValueError` if the string cannot be parsed.
+
+```python
+from nvitop import human2bytes
+
+human2bytes('200')      # 200
+human2bytes('500B')     # 500
+human2bytes('10ki')     # 10 240
+human2bytes('1MiB')     # 1 048 576
+human2bytes('1.5GiB')   # 1 610 612 736
+human2bytes('1M')       # 1 000 000  (SI)
+```
+
+---
+
+## timedelta2human
+
+```python
+def timedelta2human(
+    dt: int | float | datetime.timedelta | NaType,
+    /,
+    *,
+    round: bool = False,
+) -> str: ...
+```
+
+Converts a duration (seconds as `int`/`float`, a `datetime.timedelta`, or `NA`) to a human-readable string.
+
+<ParamField path="dt" type="int | float | timedelta | NaType" required>
+  Duration to format. Returns `NA` if `dt` is not a valid duration.
+</ParamField>
+
+<ParamField path="round" type="bool" default="False">
+  When `True`, rounds days to one decimal place at 1+ days instead of waiting for 4+ days.
+</ParamField>
+
+```python
+from nvitop import timedelta2human
+import datetime
+
+timedelta2human(90)                                      # '1:30'
+timedelta2human(3700)                                    # '1:01:40'
+timedelta2human(datetime.timedelta(days=2, seconds=100)) # '2.0 days'
+```
+
+---
+
+## utilization2string
+
+```python
+def utilization2string(utilization: int | float | NaType, /) -> str: ...
+```
+
+Formats a utilization rate as a percentage string. Returns `NA` if `utilization` is `NA`.
+
+```python
+from nvitop import utilization2string
+
+utilization2string(75)     # '75%'
+utilization2string(12.5)   # '12.5%'
+utilization2string(NA)     # 'N/A'
+```
+
+---
+
+## colored and set_color
+
+```python
+def colored(
+    text: Any,
+    /,
+    color: str | None = None,
+    on_color: str | None = None,
+    attrs: Iterable[str] | None = None,
+) -> str: ...
+
+def set_color(value: bool) -> None: ...
+```
+
+`colored` wraps text with ANSI escape codes when the output is a TTY (or when `set_color(True)` has been called).
+
+Available colors: `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`.  
+Available highlights: `on_red`, `on_green`, `on_yellow`, `on_blue`, `on_magenta`, `on_cyan`, `on_white`.  
+Available attributes: `bold`, `dark`, `underline`, `blink`, `reverse`, `concealed`.
+
+```python
+from nvitop import colored, set_color
+
+set_color(True)   # force color even when not a TTY
+
+label = colored('GPU 0', color='green', attrs=('bold',))
+print(f'{label}: {device.memory_used_human()}')
+```
+
+`set_color(False)` disables coloring and sets `NO_COLOR=1` in the environment.
+
+---
+
+## boolify
+
+```python
+def boolify(string: str, /, default: Any = None) -> bool: ...
+```
+
+Converts a string to a boolean using common truthy/falsy spellings.
+
+Truthy: `'true'`, `'yes'`, `'on'`, `'enabled'`, `'1'` (case-insensitive).  
+Falsy: `'false'`, `'no'`, `'off'`, `'disabled'`, `'0'` (case-insensitive).
+
+If the string matches neither list, `default` is used when provided; otherwise `bool(string)` is returned.
+
+```python
+from nvitop import boolify
+
+boolify('yes')       # True
+boolify('Disabled')  # False
+boolify('1')         # True
+boolify('0')         # False
+```
+
+---
+
+## ttl_cache
+
+```python
+def ttl_cache(
+    maxsize: int | Callable | None = 128,
+    *,
+    ttl: float = 600.0,
+    timer: Callable[[], float] = time.monotonic,
+    typed: bool = False,
+) -> Callable: ...
+```
+
+A time-aware LRU cache decorator. Cached entries expire after `ttl` seconds. The interface is compatible with `functools.lru_cache` and adds `cache_info()` and `cache_clear()` methods to the wrapped function.
+
+<ParamField path="maxsize" type="int | None" default="128">
+  Maximum number of cached entries. `None` means unlimited.
+</ParamField>
+
+<ParamField path="ttl" type="float" default="600.0">
+  Time-to-live for each cache entry in seconds.
+</ParamField>
+
+<ParamField path="timer" type="Callable" default="time.monotonic">
+  Callable returning the current time for TTL comparisons.
+</ParamField>
+
+<ParamField path="typed" type="bool" default="False">
+  If `True`, arguments of different types are cached separately.
+</ParamField>
+
+```python
+from nvitop import ttl_cache
+
+@ttl_cache(maxsize=256, ttl=30.0)
+def expensive_query(device_uuid: str) -> dict:
+    # result is cached for 30 seconds, up to 256 entries
+    ...
+
+expensive_query.cache_info()   # CacheInfo(hits=..., misses=..., maxsize=256, currsize=...)
+expensive_query.cache_clear()  # invalidate all entries
+```
+
+---
+
+## Integer limits
+
+| Constant | Value |
+|----------|-------|
+| `UINT_MAX` | `0xFFFFFFFF` (max value of `ctypes.c_uint`) |
+| `ULONGLONG_MAX` | `0xFFFFFFFFFFFFFFFF` (max value of `ctypes.c_ulonglong`) |
+
+These constants match the sentinel values used by NVML for "not available" numeric fields. nvitop converts them to `NA` automatically in most cases.

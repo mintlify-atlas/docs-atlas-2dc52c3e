@@ -1,0 +1,154 @@
+---
+title: "TensorBoard Integration with ResourceMetricCollector"
+description: "Stream live GPU and host resource metrics into TensorBoard during training using ResourceMetricCollector and the add_scalar_dict helper."
+---
+
+nvitop integrates with TensorBoard through two components: the `ResourceMetricCollector`, which asynchronously snapshots GPU and host metrics in a background thread, and the `add_scalar_dict` helper, which batches those metrics into `SummaryWriter.add_scalar` calls. Together they let you log per-batch and per-epoch GPU stats alongside your training losses and accuracies with minimal boilerplate.
+
+<Warning>
+  The `nvitop.callbacks.tensorboard` module is deprecated and will not be supported in future releases. Importing it raises a `FutureWarning`. The `add_scalar_dict` function itself remains useful — feel free to copy it into your own codebase or implement an equivalent using `writer.add_scalar` directly.
+</Warning>
+
+## The add_scalar_dict helper
+
+`add_scalar_dict` is a thin wrapper around `SummaryWriter.add_scalar` that writes every entry in a dict as a separate scalar, namespaced under a common tag prefix.
+
+```python
+from nvitop.callbacks.tensorboard import add_scalar_dict
+```
+
+### Signature
+
+```python
+def add_scalar_dict(
+    writer: SummaryWriter,
+    main_tag: str,
+    tag_scalar_dict: dict[str, int | float],
+    global_step: int | None = None,
+    walltime: float | None = None,
+) -> None:
+```
+
+For a dict entry with key `"gpu_id: 0/utilization.gpu (%)"` and `main_tag="resources"`, the scalar is logged as `resources/gpu_id: 0/utilization.gpu (%)`.
+
+## Combining with ResourceMetricCollector
+
+`ResourceMetricCollector` gathers metrics in a background daemon thread. Call `collector.collect()` at any point to retrieve a snapshot of all metrics accumulated since the last call, averaged over the collection interval.
+
+The `collector(tag=...)` context manager tracks nesting. Metrics collected inside nested contexts carry compound tags:
+
+```
+resources/train/batch/<metric_name>
+resources/train/<metric_name>
+resources/validate/<metric_name>
+```
+
+## Full training example
+
+The example below logs GPU and host metrics at both batch-level and epoch-level granularity alongside training loss.
+
+```python
+import os
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
+
+from nvitop import CudaDevice, ResourceMetricCollector
+from nvitop.callbacks.tensorboard import add_scalar_dict
+
+# Build networks and prepare datasets
+...
+
+# Logger and status collector
+writer = SummaryWriter()
+collector = ResourceMetricCollector(
+    devices=CudaDevice.all(),   # log all visible CUDA devices, using CUDA ordinal
+    root_pids={os.getpid()},    # only log descendant processes of the current process
+    interval=1.0,               # snapshot interval for background daemon thread
+)
+
+# Start training
+global_step = 0
+for epoch in range(num_epoch):
+    with collector(tag='train'):
+        for batch in train_dataset:
+            with collector(tag='batch'):
+                metrics = train(net, batch)
+                global_step += 1
+                add_scalar_dict(writer, 'train', metrics, global_step=global_step)
+                add_scalar_dict(
+                    writer,
+                    'resources',          # tag='resources/train/batch/...'
+                    collector.collect(),
+                    global_step=global_step,
+                )
+
+        add_scalar_dict(
+            writer,
+            'resources',              # tag='resources/train/...'
+            collector.collect(),
+            global_step=epoch,
+        )
+
+    with collector(tag='validate'):
+        metrics = validate(net, validation_dataset)
+        add_scalar_dict(writer, 'validate', metrics, global_step=epoch)
+        add_scalar_dict(
+            writer,
+            'resources',              # tag='resources/validate/...'
+            collector.collect(),
+            global_step=epoch,
+        )
+```
+
+<Tip>
+  Nesting `collector(tag='batch')` inside `collector(tag='train')` produces keys like `resources/train/batch/gpu_id: 0/utilization.gpu (%)`. This makes it easy to compare per-batch GPU load against per-epoch averages in TensorBoard's scalar dashboard.
+</Tip>
+
+## How metric keys are structured
+
+When you call `collector.collect()` after pushing two context tags (`train` and `batch`), each key in the returned dict takes the form:
+
+```
+<outer_tag>/<inner_tag>/<metric_name>/<aggregation>
+```
+
+For example:
+
+| Full key | Meaning |
+|---|---|
+| `train/batch/gpu_id: 0/utilization.gpu (%)/mean` | Mean GPU SM utilization over the batch |
+| `train/batch/gpu_id: 0/memory.used (MiB)/mean` | Mean allocated memory over the batch |
+| `train/gpu_id: 0/utilization.gpu (%)/mean` | Mean GPU SM utilization over the epoch |
+
+Passing `main_tag='resources'` to `add_scalar_dict` prepends `resources/` to every key, giving the final TensorBoard tag `resources/train/batch/gpu_id: 0/utilization.gpu (%)/mean`.
+
+## Parameters
+
+<ParamField path="writer" type="SummaryWriter" required>
+  A `torch.utils.tensorboard.SummaryWriter`, `tensorboard.summary.Writer`, or `tensorboardX.SummaryWriter` instance to write scalars to.
+</ParamField>
+
+<ParamField path="main_tag" type="str" required>
+  The tag prefix applied to every metric key. Metrics are logged as `{main_tag}/{key}`.
+</ParamField>
+
+<ParamField path="tag_scalar_dict" type="dict[str, int | float]" required>
+  A mapping of metric names to scalar values, as returned by `collector.collect()`.
+</ParamField>
+
+<ParamField path="global_step" type="int" default="None">
+  The global training step to associate with this set of scalars.
+</ParamField>
+
+<ParamField path="walltime" type="float" default="None">
+  Override the default wall-clock time (seconds since epoch) for the event. Defaults to `time.time()` when `None`.
+</ParamField>
+
+## See also
+
+- [`ResourceMetricCollector`](/api/collector) — full API reference for the metric collector
+- [Keras integration](/integrations/keras) — deprecated `GpuStatsLogger` for TensorFlow/Keras
+- [PyTorch Lightning integration](/integrations/pytorch-lightning) — deprecated `GpuStatsLogger` for Lightning

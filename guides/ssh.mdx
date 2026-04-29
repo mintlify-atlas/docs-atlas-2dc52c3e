@@ -1,0 +1,72 @@
+---
+title: "Using nvitop over an SSH connection"
+description: "Run nvitop in monitor mode on a remote machine over SSH by allocating a pseudo-terminal with the -t flag, covering system-wide and user-local installations."
+---
+
+`nvitop` monitor mode uses the `curses` library to draw its interactive interface, which requires a real terminal (TTY). When you connect over SSH, the shell session does not allocate a pseudo-terminal by default — you need to pass the `-t` flag to `ssh` so that a PTY is created and `curses` can render correctly.
+
+## Why `-t` is required
+
+Without a pseudo-terminal, `curses` cannot determine the terminal dimensions or render its box-drawing characters, and `nvitop` will exit immediately with an error. The `-t` flag tells the SSH client to request PTY allocation from the server before executing the remote command.
+
+## Running nvitop over SSH
+
+The exact command depends on where `nvitop` is installed on the remote host.
+
+<Steps>
+  <Step title="Identify the installation path">
+    On the remote machine, check which installation method was used:
+
+    ```bash
+    # System-wide install (sudo pip3 install nvitop)
+    which nvitop        # → /usr/local/bin/nvitop
+
+    # User-local install (pip3 install --user nvitop)
+    ls ~/.local/bin/nvitop
+    ```
+  </Step>
+
+  <Step title="Connect with PTY allocation">
+    Use the appropriate command depending on the installation:
+
+    <CodeGroup>
+      ```bash System-wide install
+      ssh user@host -t nvitop
+      ```
+
+      ```bash User-local install
+      ssh user@host -t '~/.local/bin/nvitop'
+      ```
+    </CodeGroup>
+
+    The single quotes around the user-local path prevent your local shell from expanding `~` before the command is sent to the remote host.
+  </Step>
+
+  <Step title="Pass additional flags (optional)">
+    You can pass any `nvitop` flags after the command name. For example, to start in compact mode:
+
+    ```bash
+    ssh user@host -t nvitop -m compact
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  If `nvitop` is installed via `uvx` or `pipx` on the remote machine, the commands above still apply — just replace `nvitop` with the appropriate invocation, such as `uvx nvitop`.
+</Tip>
+
+## Troubleshooting
+
+**`Error opening terminal: unknown.`** — This means `curses` could not detect the terminal type. Try setting the `TERM` environment variable explicitly:
+
+```bash
+ssh user@host -t "TERM=xterm-256color nvitop"
+```
+
+**`nvitop: command not found`** — The remote `PATH` may not include the Python script directory. Use the full path to the binary:
+
+```bash
+ssh user@host -t '~/.local/bin/nvitop'
+# or
+ssh user@host -t 'python3 -m nvitop'
+```

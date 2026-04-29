@@ -1,0 +1,134 @@
+---
+title: "GPU Stats Logging for Lightning and PyTorch Lightning"
+description: "Automatically log GPU memory, utilization, and timing metrics into any Lightning-compatible logger during training with a single callback."
+---
+
+The `GpuStatsLogger` callback for PyTorch Lightning (now Lightning) attaches to your `Trainer` and logs GPU metrics via NVML at the start and end of every training batch. Because it delegates to `trainer.logger.log_metrics`, any logger you have configured — TensorBoard, WandbLogger, CSVLogger, and others — will receive the GPU stats without any extra wiring.
+
+<Warning>
+  `nvitop.callbacks.lightning.GpuStatsLogger` is deprecated and will not be supported in future releases. A `FutureWarning` is raised on instantiation. For new projects, implement your own callback using the [`ResourceMetricCollector`](/api/collector) API, which provides more flexible and framework-agnostic metric collection.
+</Warning>
+
+## Installation
+
+`GpuStatsLogger` is included with `nvitop` and requires Lightning to be installed separately.
+
+```python
+from nvitop.callbacks.lightning import GpuStatsLogger
+```
+
+If you are using an older version of the library that ships as `pytorch_lightning`, the same class is also available via:
+
+```python
+from nvitop.callbacks.pytorch_lightning import GpuStatsLogger
+```
+
+## Usage
+
+<Steps>
+  <Step title="Create the callback">
+    Instantiate `GpuStatsLogger` with whichever optional metrics you want. All parameters are keyword-only.
+
+    ```python
+    from nvitop.callbacks.lightning import GpuStatsLogger
+
+    gpu_stats = GpuStatsLogger()
+    ```
+  </Step>
+
+  <Step title="Assign a logger to your Trainer">
+    The callback raises `MisconfigurationException` if `trainer.logger` is `None`. Pass any built-in Lightning logger, or set `logger=True` to use the default TensorBoard logger.
+
+    ```python
+    from lightning.pytorch import Trainer
+
+    trainer = Trainer(gpus=[..], logger=True, callbacks=[gpu_stats])
+    ```
+  </Step>
+
+  <Step title="Train as normal">
+    GPU stats are automatically logged at each training batch step. No other changes to your training loop are needed.
+
+    ```python
+    trainer.fit(model, datamodule=dm)
+    ```
+  </Step>
+</Steps>
+
+## Full example
+
+```python
+from lightning.pytorch import Trainer
+from nvitop.callbacks.lightning import GpuStatsLogger
+
+gpu_stats = GpuStatsLogger()
+trainer = Trainer(gpus=[..], logger=True, callbacks=[gpu_stats])
+```
+
+<Note>
+  The `Trainer` must have a logger assigned. Passing `logger=False` or omitting a logger will cause a `MisconfigurationException` when training starts. The callback also raises `MisconfigurationException` if the root device type is not `cuda`.
+</Note>
+
+## Constructor parameters
+
+All parameters are keyword-only.
+
+<ParamField path="memory_utilization" type="bool" default="True">
+  Log used memory (MiB), free memory (MiB), and memory utilization (%) at the start and end of each step.
+</ParamField>
+
+<ParamField path="gpu_utilization" type="bool" default="True">
+  Log GPU SM utilization (%) at the start and end of each step.
+</ParamField>
+
+<ParamField path="intra_step_time" type="bool" default="False">
+  Log the wall-clock time spent inside each training step, in milliseconds.
+</ParamField>
+
+<ParamField path="inter_step_time" type="bool" default="False">
+  Log the wall-clock time between the end of one step and the start of the next, in milliseconds.
+</ParamField>
+
+<ParamField path="fan_speed" type="bool" default="False">
+  Log the fan speed as a percentage of maximum speed.
+</ParamField>
+
+<ParamField path="temperature" type="bool" default="False">
+  Log the GPU core temperature in degrees Celsius.
+</ParamField>
+
+## Logged metrics
+
+Metrics are prefixed with the CUDA device index. When the CUDA index differs from the physical device index, the physical index is appended for reference.
+
+| Metric key | Description |
+|---|---|
+| `gpu_id: 0/utilization.gpu (%)` | SM utilization, percentage |
+| `gpu_id: 0/utilization.memory (%)` | Memory bandwidth utilization, percentage |
+| `gpu_id: 0/memory.used (MiB)` | Allocated memory |
+| `gpu_id: 0/memory.free (MiB)` | Free memory |
+| `gpu_id: 0/fan.speed (%)` | Fan speed (if `fan_speed=True`) |
+| `gpu_id: 0/temperature.gpu (C)` | Core temperature (if `temperature=True`) |
+| `batch_time/intra_step (ms)` | Step duration (if `intra_step_time=True`) |
+| `batch_time/inter_step (ms)` | Time between steps (if `inter_step_time=True`) |
+
+## Modern alternative
+
+For new projects, use [`ResourceMetricCollector`](/api/collector) directly. It works with any training framework and any logging backend:
+
+```python
+import os
+from nvitop import CudaDevice, ResourceMetricCollector
+
+collector = ResourceMetricCollector(
+    devices=CudaDevice.all(),
+    root_pids={os.getpid()},
+    interval=1.0,
+)
+
+# Use as a context manager around your training loop
+with collector(tag='train'):
+    for batch in train_dataloader:
+        metrics = collector.collect()
+        # log `metrics` with your preferred logger
+```

@@ -1,0 +1,94 @@
+---
+title: "Python API Overview — nvitop GPU Monitoring Library"
+description: "A guided tour of nvitop's Python API: Device, GpuProcess, ResourceMetricCollector, and utilities for building GPU monitoring tools in pure Python."
+---
+
+The nvitop Python API lets you query live GPU state, enumerate processes, and collect time-series resource metrics directly from Python — no shell parsing, no subprocess calls. Everything is exposed through a small set of classes and functions that ship inside the `nvitop` package, so no extra installation step is required beyond `pip install nvitop`.
+
+<Note>
+The API requires the NVIDIA Management Library (NVML) to be present at runtime. NVML is bundled with every NVIDIA display driver. Import errors are raised as `NVMLError` subclasses, not plain `ImportError`.
+</Note>
+
+## Installation
+
+```bash
+pip install nvitop
+```
+
+All public symbols are re-exported from the top-level `nvitop` namespace:
+
+```python
+from nvitop import (
+    Device, PhysicalDevice, MigDevice,
+    CudaDevice, CudaMigDevice,
+    parse_cuda_visible_devices, normalize_cuda_visible_devices,
+    HostProcess, GpuProcess, command_join,
+    ResourceMetricCollector, take_snapshots, collect_in_background,
+    NA, NaType, Snapshot,
+    KiB, MiB, GiB, TiB, PiB,
+    bytes2human, human2bytes, timedelta2human,
+    utilization2string, colored, set_color, boolify,
+    ttl_cache,
+    NVMLError, nvmlCheckReturn,
+)
+```
+
+## Quick example
+
+The following ten-line script prints live GPU stats and the processes running on each device:
+
+```python
+from nvitop import Device
+
+devices = Device.all()          # list[PhysicalDevice]
+for device in devices:
+    processes = device.processes()   # dict[int, GpuProcess]
+    print(device)
+    print(f'  Used memory : {device.memory_used_human()}')
+    print(f'  GPU util    : {device.gpu_utilization()}%')
+    print(f'  Processes   : {len(processes)}')
+    for pid, proc in sorted(processes.items()):
+        print(f'    [{pid}] {proc.command()} — {proc.gpu_memory_human()}')
+```
+
+## Public exports
+
+The full `__all__` list from `nvitop.api`:
+
+<Expandable title="All public names">
+
+| Symbol | Source module |
+|--------|--------------|
+| `NVMLError`, `nvmlCheckReturn` | `nvitop.api.libnvml` |
+| `Device`, `PhysicalDevice`, `MigDevice`, `CudaDevice`, `CudaMigDevice` | `nvitop.api.device` |
+| `parse_cuda_visible_devices`, `normalize_cuda_visible_devices` | `nvitop.api.device` |
+| `HostProcess`, `GpuProcess`, `command_join` | `nvitop.api.process` |
+| `take_snapshots`, `collect_in_background`, `ResourceMetricCollector` | `nvitop.api.collector` |
+| `ttl_cache` | `nvitop.api.caching` |
+| `NA`, `NaType`, `NotApplicable`, `NotApplicableType` | `nvitop.api.utils` |
+| `UINT_MAX`, `ULONGLONG_MAX` | `nvitop.api.utils` |
+| `KiB`, `MiB`, `GiB`, `TiB`, `PiB`, `SIZE_UNITS` | `nvitop.api.utils` |
+| `bytes2human`, `human2bytes`, `timedelta2human` | `nvitop.api.utils` |
+| `utilization2string`, `colored`, `set_color`, `boolify` | `nvitop.api.utils` |
+| `Snapshot` | `nvitop.api.utils` |
+| `host` | `nvitop.api.host` (re-exported module) |
+| `libnvml`, `libcuda`, `libcudart` | low-level NVML/CUDA bindings |
+
+</Expandable>
+
+## Sub-pages
+
+<CardGroup cols={2}>
+  <Card title="Device" icon="microchip" href="/api/device">
+    `Device`, `PhysicalDevice`, `MigDevice`, `CudaDevice`, `CudaMigDevice`, and CUDA_VISIBLE_DEVICES helpers.
+  </Card>
+  <Card title="Process" icon="terminal" href="/api/process">
+    `GpuProcess`, `HostProcess`, `command_join`, and snapshot helpers.
+  </Card>
+  <Card title="Collector" icon="chart-line" href="/api/collector">
+    `ResourceMetricCollector`, `take_snapshots`, and `collect_in_background` for time-series metrics.
+  </Card>
+  <Card title="Utilities" icon="wrench" href="/api/utils">
+    `NA`, `Snapshot`, size constants, formatting helpers, and `ttl_cache`.
+  </Card>
+</CardGroup>

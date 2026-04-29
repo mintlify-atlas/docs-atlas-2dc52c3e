@@ -1,0 +1,356 @@
+---
+title: "Collector API — nvitop GPU Resource Metric Collection"
+description: "Reference for ResourceMetricCollector, take_snapshots, and collect_in_background: gather time-windowed mean/min/max GPU and host metrics asynchronously."
+---
+
+The collector module provides three complementary tools for recording resource usage over time. `take_snapshots` is a one-shot helper that captures device and process state at a single point. `ResourceMetricCollector` collects GPU and host metrics continuously in a background thread, returning time-windowed mean, minimum, and maximum values on demand. `collect_in_background` is a convenience wrapper that runs a collector on a daemon thread and fires a callback on each interval.
+
+<Note>
+`ResourceMetricCollector` uses a background daemon thread to take periodic snapshots. All collection is asynchronous — your training loop or application is never blocked by metric gathering.
+</Note>
+
+---
+
+## take_snapshots
+
+```python
+def take_snapshots(
+    devices: Device | Iterable[Device] | None = None,
+    *,
+    gpu_processes: bool | GpuProcess | Iterable[GpuProcess] | None = None,
+) -> SnapshotResult: ...
+```
+
+Retrieves the status of the requested devices and GPU processes atomically and returns a `SnapshotResult(devices, gpu_processes)` named tuple.
+
+<ParamField path="devices" type="Device | Iterable[Device] | None" optional>
+  Devices to snapshot. If omitted, defaults to all physical devices (or the devices used by the supplied `gpu_processes`).
+</ParamField>
+
+<ParamField path="gpu_processes" type="bool | GpuProcess | Iterable[GpuProcess] | None" optional>
+  Processes to snapshot. If omitted, all processes on the requested devices are included. Pass `False` to suppress process snapshots entirely.
+</ParamField>
+
+```python
+from nvitop import take_snapshots, Device
+import os
+
+os.environ['CUDA_DEVICE_ORDER']    = 'PCI_BUS_ID'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1,0'
+
+# All devices and all their processes
+result = take_snapshots()
+
+# Unpack as a tuple
+device_snaps, process_snaps = take_snapshots(Device.all())
+
+# Device snapshots only — skip process enumeration
+device_snaps, _ = take_snapshots(gpu_processes=False)
+
+# Use CUDA ordinal — snapshots carry cuda_index
+result = take_snapshots(Device.cuda.all())
+
+# Single device
+result = take_snapshots(Device.cuda(1))
+```
+
+---
+
+## ResourceMetricCollector
+
+```python
+class ResourceMetricCollector:
+    def __init__(
+        self,
+        devices: Iterable[Device] | None = None,
+        *,
+        root_pids: Iterable[int] | None = None,
+        interval: float = 1.0,
+    ) -> None: ...
+```
+
+Collects host, GPU device, and GPU process metrics in a background thread. Call `.collect()` at any time to retrieve mean/min/max statistics over the elapsed period.
+
+<ParamField path="devices" type="Iterable[Device] | None" optional>
+  Devices to monitor. Defaults to all physical devices returned by `Device.all()`.
+</ParamField>
+
+<ParamField path="root_pids" type="Iterable[int] | None" optional>
+  Root PIDs whose descendant GPU processes are tracked. Defaults to `{os.getpid()}` — only descendants of the current process. Pass `root_pids={1}` to monitor all GPU processes on the system.
+</ParamField>
+
+<ParamField path="interval" type="float" default="1.0">
+  Background snapshot interval in seconds. Must be positive.
+</ParamField>
+
+### Construction examples
+
+```python
+from nvitop import ResourceMetricCollector, Device
+
+# All GPUs, current process and its children only
+collector = ResourceMetricCollector()
+
+# All GPUs, all GPU processes on the system
+collector = ResourceMetricCollector(root_pids={1})
+
+# CUDA ordinal, current process descendants only
+collector = ResourceMetricCollector(devices=Device.cuda.all())
+
+# Specific GPU, all processes, 2-second snapshot interval
+collector = ResourceMetricCollector(
+    devices=Device(0),
+    root_pids={1},
+    interval=2.0,
+)
+```
+
+### Context manager usage
+
+The primary way to use the collector is as a context manager (via the `__call__` / `context` method). Activate a named collection session with a tag, then call `.collect()` inside the block:
+
+```python
+with collector(tag='train'):
+    # ... run training ...
+    metrics = collector.collect()   # dict[str, float]
+```
+
+Tags can be nested:
+
+```python
+with collector(tag='train'):
+    for batch in dataset:
+        with collector(tag='batch'):
+            loss = train_step(batch)
+            batch_metrics = collector.collect()  # 'train/batch/...' keys
+
+    epoch_metrics = collector.collect()          # 'train/...' keys
+```
+
+### `.collect() -> dict[str, float]`
+
+Returns a dictionary of all metrics accumulated since the last `activate()` (or `clear()`). Each key follows the pattern:
+
+```
+'<tag>/<scope>/<metric (unit)>/<mean|min|max>'
+```
+
+Special keys with no aggregation suffix:
+
+- `'<tag>/duration (s)'` — elapsed wall-clock seconds
+- `'<tag>/timestamp'` — Unix epoch of the last snapshot
+
+<Expandable title="Example collect() output">
+
+```python
+{
+    'train/host/cpu_percent (%)/mean': 8.97,
+    'train/host/cpu_percent (%)/min': 6.1,
+    'train/host/cpu_percent (%)/max': 28.1,
+    'train/host/memory_percent (%)/mean': 21.5,
+    'train/host/swap_percent (%)/mean': 0.3,
+    'train/host/memory_used (GiB)/mean': 91.01,
+    'train/host/load_average (%) (1 min)/mean': 10.25,
+    'train/host/load_average (%) (5 min)/mean': 10.07,
+    'train/host/load_average (%) (15 min)/mean': 11.91,
+    # Per-device (CUDA ordinal shown when using CudaDevice)
+    'train/cuda:0 (gpu:3)/memory_used (MiB)/mean': 3.875,
+    'train/cuda:0 (gpu:3)/memory_free (MiB)/mean': 11015.56,
+    'train/cuda:0 (gpu:3)/memory_total (MiB)/mean': 11019.44,
+    'train/cuda:0 (gpu:3)/memory_percent (%)/mean': 0.0,
+    'train/cuda:0 (gpu:3)/gpu_utilization (%)/mean': 0.0,
+    'train/cuda:0 (gpu:3)/memory_utilization (%)/mean': 0.0,
+    'train/cuda:0 (gpu:3)/fan_speed (%)/mean': 22.0,
+    'train/cuda:0 (gpu:3)/temperature (C)/mean': 25.0,
+    'train/cuda:0 (gpu:3)/power_usage (W)/mean': 19.11,
+    # Per-process (descendants of root_pids only)
+    'train/pid:12345/host/cpu_percent (%)/mean': 151.34,
+    'train/pid:12345/host/host_memory (MiB)/mean': 44749.72,
+    'train/pid:12345/host/host_memory_percent (%)/mean': 8.68,
+    'train/pid:12345/host/running_time (min)': 336.24,
+    'train/pid:12345/cuda:1 (gpu:4)/gpu_memory (MiB)/mean': 8861.0,
+    'train/pid:12345/cuda:1 (gpu:4)/gpu_memory_percent (%)/mean': 80.4,
+    'train/pid:12345/cuda:1 (gpu:4)/gpu_memory_utilization (%)/mean': 6.71,
+    'train/pid:12345/cuda:1 (gpu:4)/gpu_sm_utilization (%)/mean': 48.23,
+    'train/duration (s)': 7.25,
+    'train/timestamp': 1655909466.998,
+}
+```
+
+</Expandable>
+
+### `.activate(tag) / .start(tag)` and `.deactivate([tag]) / .stop([tag])`
+
+Lower-level alternatives to the context manager if you need manual control:
+
+```python
+collector.activate(tag='eval')
+# ... work ...
+metrics = collector.collect()
+collector.deactivate()
+```
+
+### `.clear([tag])`
+
+Resets the accumulated statistics for the active tag (and all nested tags) without stopping collection.
+
+```python
+with collector(tag='train'):
+    time.sleep(5.0)
+    metrics_5s = collector.collect()
+
+    collector.clear()       # reset; next collect() starts fresh
+    time.sleep(5.0)
+    metrics_5s_fresh = collector.collect()
+```
+
+---
+
+## collect_in_background
+
+```python
+def collect_in_background(
+    on_collect: Callable[[dict[str, float]], bool],
+    collector: ResourceMetricCollector | None = None,
+    interval: float | None = None,
+    *,
+    on_start: Callable[[ResourceMetricCollector], None] | None = None,
+    on_stop: Callable[[ResourceMetricCollector], None] | None = None,
+    tag: str = 'metrics-daemon',
+    start: bool = True,
+) -> threading.Thread: ...
+```
+
+Starts a daemon thread that calls `on_collect(metrics)` every `interval` seconds. Return `False` from `on_collect` to stop the thread.
+
+<ParamField path="on_collect" type="Callable[[dict[str, float]], bool]" required>
+  Called with the metrics dictionary on each interval. Return `True` to continue, `False` to stop.
+</ParamField>
+
+<ParamField path="collector" type="ResourceMetricCollector | None" optional>
+  The collector to use. Defaults to a new `ResourceMetricCollector()` covering all GPUs and current-process descendants.
+</ParamField>
+
+<ParamField path="interval" type="float | None" optional>
+  Collection interval in seconds. Defaults to `collector.interval`.
+</ParamField>
+
+<ParamField path="on_start" type="Callable | None" optional>
+  Called once before the collection loop starts.
+</ParamField>
+
+<ParamField path="on_stop" type="Callable | None" optional>
+  Called once after the collection loop ends (whether by returning `False` or by exception).
+</ParamField>
+
+<ParamField path="tag" type="str" default="'metrics-daemon'">
+  Tag prefix used for metric keys.
+</ParamField>
+
+<ParamField path="start" type="bool" default="True">
+  If `True`, starts the daemon thread before returning.
+</ParamField>
+
+```python
+from nvitop import Device, ResourceMetricCollector, collect_in_background
+
+logger = ...
+
+def on_collect(metrics):
+    if logger.is_closed():
+        return False
+    logger.log(metrics)
+    return True
+
+def on_stop(collector):
+    if not logger.is_closed():
+        logger.close()
+
+collect_in_background(
+    on_collect,
+    ResourceMetricCollector(Device.cuda.all()),
+    interval=5.0,
+    on_stop=on_stop,
+)
+```
+
+---
+
+## ResourceMetricCollector.daemonize
+
+```python
+def daemonize(
+    self,
+    on_collect: Callable[[dict[str, float]], bool],
+    interval: float | None = None,
+    *,
+    on_start: Callable[[ResourceMetricCollector], None] | None = None,
+    on_stop: Callable[[ResourceMetricCollector], None] | None = None,
+    tag: str = 'metrics-daemon',
+    start: bool = True,
+) -> threading.Thread: ...
+```
+
+Instance-method equivalent of `collect_in_background`. Binds the collector instance automatically:
+
+```python
+ResourceMetricCollector(Device.cuda.all()).daemonize(
+    on_collect,
+    interval=5.0,
+    on_stop=on_stop,
+)
+```
+
+---
+
+## TensorBoard integration
+
+```python
+import os
+from torch.utils.tensorboard import SummaryWriter
+from nvitop import CudaDevice, ResourceMetricCollector
+from nvitop.callbacks.tensorboard import add_scalar_dict
+
+writer    = SummaryWriter()
+collector = ResourceMetricCollector(
+    devices=CudaDevice.all(),
+    root_pids={os.getpid()},
+    interval=1.0,
+)
+
+global_step = 0
+for epoch in range(num_epochs):
+    with collector(tag='train'):
+        for batch in train_loader:
+            with collector(tag='batch'):
+                loss = train_step(net, batch)
+                global_step += 1
+                add_scalar_dict(writer, 'resources',
+                                collector.collect(),
+                                global_step=global_step)
+
+        add_scalar_dict(writer, 'resources',
+                        collector.collect(),
+                        global_step=epoch)
+```
+
+## CSV logging
+
+```python
+import datetime, time
+import pandas as pd
+from nvitop import ResourceMetricCollector
+
+collector = ResourceMetricCollector(root_pids={1}, interval=2.0)
+df = pd.DataFrame()
+
+with collector(tag='resources'):
+    for _ in range(60):
+        time.sleep(60)
+        metrics  = collector.collect()
+        df_chunk = pd.DataFrame.from_records(metrics, index=[len(df)])
+        df       = pd.concat([df, df_chunk], ignore_index=True)
+
+df.insert(0, 'time', df['resources/timestamp'].map(datetime.datetime.fromtimestamp))
+df.to_csv('results.csv', index=False)
+```

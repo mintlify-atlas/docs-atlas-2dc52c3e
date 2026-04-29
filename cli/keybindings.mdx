@@ -1,0 +1,111 @@
+---
+title: "Keybindings for nvitop monitor mode"
+description: "Full keyboard shortcut reference for nvitop's interactive monitor mode, covering navigation, process signals, sorting, views, and display controls."
+---
+
+When `nvitop` runs in monitor mode it accepts keyboard and mouse input continuously. The keybindings below are organized by function. Press `h` or `?` at any time to open the built-in help screen, and `q` to quit.
+
+<Tip>
+  To safely terminate or kill a process, first press `t` to open the tree-view screen, select the target process, then send the signal. The tree view shows parent–child relationships so you can avoid accidentally targeting the wrong process.
+</Tip>
+
+## Navigation and process selection
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Select the previous / next process |
+| `Alt-k` / `Alt-j` | Select the previous / next process (Vim-style) |
+| `Tab` / `Shift-Tab` | Select the next / previous process |
+| `Wheel up` / `Wheel down` | Select the previous / next process |
+| `Home` | Jump to the first process |
+| `End` | Jump to the last process |
+| `PageUp` / `PageDown` | Scroll the entire screen up / down |
+| `Alt-K` / `Alt-J` | Scroll the entire screen up / down |
+| `[` / `]` | Scroll the entire screen up / down |
+
+## Horizontal scrolling
+
+| Key | Action |
+|-----|--------|
+| `←` / `→` | Scroll the host info columns left / right |
+| `Alt-h` / `Alt-l` | Scroll the host info columns left / right (Vim-style) |
+| `Shift-Wheel left` / `Shift-Wheel right` | Scroll the host info columns left / right |
+| `Ctrl-a` / `^` | Scroll to the beginning of the process entry |
+| `Ctrl-e` / `$` | Scroll to the end of the process entry |
+
+## Process management
+
+<Warning>
+  Sending `SIGKILL` (`K`) is immediate and non-catchable. Use `SIGTERM` (`T`) first to allow the process to clean up. Normal users can only signal their own processes; run `sudo nvitop` to act on processes owned by other users.
+</Warning>
+
+| Key | Action |
+|-----|--------|
+| `Space` | Tag / untag the current process |
+| `Esc` | Clear the process selection / tagged processes |
+| `Ctrl-c` / `I` | Send `SIGINT` to the selected process (interrupt) |
+| `T` | Send `SIGTERM` to the selected process (terminate) |
+| `K` | Send `SIGKILL` to the selected process (kill) |
+
+## Views and screens
+
+| Key | Action |
+|-----|--------|
+| `e` | Show the environment variables of the selected process |
+| `t` | Toggle the tree-view screen (shows parent–child process relationships) |
+| `Enter` / `Return` | Open the process metrics screen with live graphs for the selected process |
+
+## Sorting
+
+You can change the sort column using two-character sequences that start with `o`. Uppercase letters in parentheses reverse the sort order.
+
+<Tabs>
+  <Tab title="Column shortcuts">
+    | Key | Sort column | Order |
+    |-----|-------------|-------|
+    | `on` | `GPU` (natural/device order) | Ascending |
+    | `oN` | `GPU` (natural/device order) | Descending |
+    | `ou` | `USER` | Ascending |
+    | `oU` | `USER` | Descending |
+    | `op` | `PID` | Descending |
+    | `oP` | `PID` | Ascending |
+    | `og` | `GPU-MEM` | Descending |
+    | `oG` | `GPU-MEM` | Ascending |
+    | `os` | `%SM` (streaming multiprocessor) | Descending |
+    | `oS` | `%SM` | Ascending |
+    | `oc` | `%CPU` | Descending |
+    | `oC` | `%CPU` | Ascending |
+    | `om` | `%MEM` | Descending |
+    | `oM` | `%MEM` | Ascending |
+    | `ot` | `TIME` | Descending |
+    | `oT` | `TIME` | Ascending |
+  </Tab>
+  <Tab title="Interactive column navigation">
+    | Key | Action |
+    |-----|--------|
+    | `,` | Move the sort column one position to the left |
+    | `.` | Move the sort column one position to the right |
+    | `/` | Reverse the current sort order |
+  </Tab>
+</Tabs>
+
+## Display and window controls
+
+| Key | Action |
+|-----|--------|
+| `q` | Quit and return to the terminal |
+| `h` / `?` | Open the help screen |
+| `a` | Switch display mode to `auto` |
+| `f` | Switch display mode to `full` |
+| `c` | Switch display mode to `compact` |
+| `r` | Force-refresh the window |
+| `Ctrl-r` | Force-refresh the window |
+| `F5` | Force-refresh the window |
+
+## Mouse support
+
+nvitop supports mouse input in monitor mode. Clicking a process row selects it. Scrolling with the mouse wheel navigates the process list vertically. Holding `Shift` while scrolling scrolls the host-info columns horizontally.
+
+<Note>
+  Mouse support on Windows depends on the terminal emulator. PDCurses is used on Windows instead of the standard curses library, and behavior may vary. If mouse input is unreliable, use keyboard navigation instead.
+</Note>

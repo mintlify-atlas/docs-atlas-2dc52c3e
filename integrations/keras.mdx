@@ -1,0 +1,124 @@
+---
+title: "GPU Stats Logging for TensorFlow / Keras Training"
+description: "Log per-step GPU memory usage, utilization, fan speed, and temperature directly into TensorBoard or CSVLogger during Keras model training."
+---
+
+The `GpuStatsLogger` callback for Keras automatically queries GPU metrics via NVML at the start and end of each training batch and feeds them into whichever logging backend you have attached to your model — either `TensorBoard` or `CSVLogger`. It is a drop-in addition to your existing `model.fit` call and requires no changes to your model code.
+
+<Warning>
+  `nvitop.callbacks.keras.GpuStatsLogger` is deprecated and will not be supported in future releases. A `FutureWarning` is raised on instantiation. Consider implementing your own callback using the [`ResourceMetricCollector`](/api/collector) API instead.
+</Warning>
+
+## Installation
+
+`GpuStatsLogger` is included with `nvitop` and requires TensorFlow to be installed separately.
+
+```python
+from nvitop.callbacks.keras import GpuStatsLogger
+```
+
+## Usage
+
+<Steps>
+  <Step title="Create your logging callback">
+    Create a `TensorBoard` or `CSVLogger` callback as you normally would.
+
+    ```python
+    from tensorflow.python.keras.callbacks import TensorBoard
+
+    tb_callback = TensorBoard(log_dir='./logs')
+    ```
+  </Step>
+
+  <Step title="Create the GpuStatsLogger">
+    Pass the GPUs you want to monitor. You can provide a list of GPU IDs, a list of TensorFlow device name strings, or a plain integer for the number of GPUs.
+
+    ```python
+    from nvitop.callbacks.keras import GpuStatsLogger
+
+    gpus = ['/gpu:0', '/gpu:1']  # or gpus = [0, 1] or gpus = 2
+    gpu_stats = GpuStatsLogger(gpus)
+    ```
+  </Step>
+
+  <Step title="Pass both callbacks to model.fit">
+    Place `GpuStatsLogger` **before** the TensorBoard or CSVLogger callback in the list. The stats logger writes to the `logs` dict that downstream callbacks read.
+
+    ```python
+    model.fit(.., callbacks=[gpu_stats, tb_callback])
+    ```
+  </Step>
+</Steps>
+
+## Full example
+
+```python
+from tensorflow.python.keras.utils.multi_gpu_utils import multi_gpu_model
+from tensorflow.python.keras.callbacks import TensorBoard
+from nvitop.callbacks.keras import GpuStatsLogger
+
+gpus = ['/gpu:0', '/gpu:1']  # or `gpus = [0, 1]` or `gpus = 2`
+model = Xception(weights=None, ..)
+model = multi_gpu_model(model, gpus)  # optional
+model.compile(..)
+
+tb_callback = TensorBoard(log_dir='./logs')  # or `keras.callbacks.CSVLogger`
+gpu_stats = GpuStatsLogger(gpus)
+model.fit(.., callbacks=[gpu_stats, tb_callback])
+```
+
+<Note>
+  `GpuStatsLogger` must appear **before** `TensorBoard` or `CSVLogger` in the callbacks list. The GPU stats are written into the `logs` dict during `on_train_batch_start` and `on_train_batch_end`, so the logger callback must run after them.
+</Note>
+
+## Constructor parameters
+
+<ParamField path="gpus" type="int | list[int | str] | tuple[int | str, ...]" required>
+  The GPUs to monitor. Accepts:
+  - An integer — monitors the first N GPUs (e.g. `2` monitors GPU 0 and GPU 1)
+  - A list of integer indices (e.g. `[0, 1]`)
+  - A list of TensorFlow device name strings (e.g. `['/gpu:0', '/gpu:1']`)
+</ParamField>
+
+<ParamField path="memory_utilization" type="bool" default="True">
+  Log used memory (MiB), free memory (MiB), and memory utilization (%) at the start and end of each step.
+</ParamField>
+
+<ParamField path="gpu_utilization" type="bool" default="True">
+  Log GPU SM utilization (%) at the start and end of each step.
+</ParamField>
+
+<ParamField path="intra_step_time" type="bool" default="False">
+  Log the wall-clock time spent inside each training step, in milliseconds.
+</ParamField>
+
+<ParamField path="inter_step_time" type="bool" default="False">
+  Log the wall-clock time between the end of one step and the start of the next, in milliseconds.
+</ParamField>
+
+<ParamField path="fan_speed" type="bool" default="False">
+  Log the fan speed as a percentage of maximum speed.
+</ParamField>
+
+<ParamField path="temperature" type="bool" default="False">
+  Log the GPU core temperature in degrees Celsius.
+</ParamField>
+
+## Logged metrics
+
+All metrics are prefixed with the CUDA device index and, when the CUDA index differs from the physical index, the physical index is included for clarity. For example:
+
+| Metric key | Description |
+|---|---|
+| `gpu_id: 0/utilization.gpu (%)` | SM utilization, percentage |
+| `gpu_id: 0/utilization.memory (%)` | Memory bandwidth utilization, percentage |
+| `gpu_id: 0/memory.used (MiB)` | Allocated memory |
+| `gpu_id: 0/memory.free (MiB)` | Free memory |
+| `gpu_id: 0/fan.speed (%)` | Fan speed (if `fan_speed=True`) |
+| `gpu_id: 0/temperature.gpu (C)` | Core temperature (if `temperature=True`) |
+
+## Error handling
+
+The constructor raises `ValueError` if:
+- The NVIDIA driver is not installed or NVML cannot be initialized.
+- Any of the requested GPU indices are not available on the system.

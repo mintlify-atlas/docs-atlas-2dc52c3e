@@ -1,0 +1,282 @@
+---
+title: "nvisel — CUDA visible devices selection tool"
+description: "Reference for every nvisel flag for selecting GPUs by free memory, utilization, and count constraints, plus the select_devices Python API."
+---
+
+`nvisel` ships alongside `nvitop` and automates the selection of `CUDA_VISIBLE_DEVICES`. It evaluates all available GPUs against the constraints you specify and prints a sorted, comma-separated list of device identifiers ready for use in shell assignments or training scripts.
+
+```bash
+# All devices, sorted by free memory descending
+nvisel
+
+# Equivalent using the Python module
+python3 -m nvitop.select
+```
+
+<Tip>
+  `nvisel` sorts devices by free memory (descending) and GPU utilization (ascending) by default, so the first identifier in the output is always the most available device.
+</Tip>
+
+## Constraint options
+
+<ParamField path="--inherit" type="CUDA_VISIBLE_DEVICES" required={false}>
+  Restrict the candidate pool to the devices currently listed in `CUDA_VISIBLE_DEVICES`. When the argument is omitted, the value is read from the environment variable of the same name.
+
+  Short form: `-i`
+
+  ```bash
+  # Inherit from the environment
+  nvisel -i
+
+  # Provide an explicit value
+  nvisel -i "GPU-18ef14e9,GPU-849d5a8d"
+
+  # Normalize UUID abbreviations to full UUIDs, no re-sorting
+  nvisel -i "GPU-18ef14e9,GPU-849d5a8d" -S -O uuid --newline
+  ```
+</ParamField>
+
+<ParamField path="--account-as-free" type="USERNAME [USERNAME ...]" required={false}>
+  Treat the GPU memory currently used by the specified users as free when evaluating constraints. Useful for selecting devices that are occupied only by your own processes.
+
+  When the flag is given without arguments, the current user (`$USER`) is used.
+
+  ```bash
+  nvisel --account-as-free alice
+  nvisel --account-as-free        # current user
+  ```
+</ParamField>
+
+<ParamField path="--min-count" type="N" required={false}>
+  Minimum number of devices to select. Defaults to `0`. If fewer than `N` devices satisfy the constraints, `nvisel` exits with a non-zero status.
+
+  Short form: `-c`
+
+  ```bash
+  nvisel -c 2   # require at least 2 matching devices
+  ```
+</ParamField>
+
+<ParamField path="--max-count" type="N" required={false}>
+  Maximum number of devices to select. Defaults to all qualifying devices.
+
+  Short form: `-C`
+
+  ```bash
+  nvisel -C 4   # return at most 4 devices
+  ```
+</ParamField>
+
+<ParamField path="--count" type="N" required={false}>
+  Set both `--min-count` and `--max-count` to `N` simultaneously. Use this when you need exactly `N` devices.
+
+  Short form: `-n`
+
+  ```bash
+  nvisel -n 4   # select exactly 4 devices
+  ```
+</ParamField>
+
+<ParamField path="--min-free-memory" type="SIZE" required={false}>
+  Minimum free memory each candidate device must have. Accepts human-readable sizes: `4GiB`, `5000M`, `10737418240`, etc.
+
+  When this constraint is given, it is checked against **all** devices (not only a pre-filtered subset).
+
+  Short form: `-f`
+
+  ```bash
+  nvisel -f 8GiB
+  nvisel -f 5000M
+  ```
+</ParamField>
+
+<ParamField path="--min-total-memory" type="SIZE" required={false}>
+  Minimum total (installed) memory each candidate device must have. Same size format as `--min-free-memory`.
+
+  When this constraint is given, it is checked against **all** devices.
+
+  Short form: `-t`
+
+  ```bash
+  nvisel -t 16GiB
+  ```
+</ParamField>
+
+<ParamField path="--max-gpu-utilization" type="RATE" required={false}>
+  Maximum GPU compute utilization (in percent, 0–100) allowed for a candidate device.
+
+  When this constraint is given, it is checked against **all** devices.
+
+  Short form: `-G`
+
+  ```bash
+  nvisel -G 30    # devices with ≤ 30% GPU utilization
+  ```
+</ParamField>
+
+<ParamField path="--max-memory-utilization" type="RATE" required={false}>
+  Maximum memory bandwidth utilization (in percent, 0–100) allowed for a candidate device.
+
+  When this constraint is given, it is checked against **all** devices.
+
+  Short form: `-M`
+
+  ```bash
+  nvisel -M 50
+  ```
+</ParamField>
+
+<ParamField path="--tolerance" type="TOL" required={false}>
+  Tolerance percentage for loosening constraints when not enough devices satisfy them strictly. Default: `10`.
+
+  Also available as `--tol`.
+
+  With `--tolerance=20` and `--min-free-memory=5GiB`, a device with only `4GiB` free (5 GiB × (1 − 0.20) = 4 GiB) is accepted.
+
+  ```bash
+  nvisel -f 5GiB --tolerance 20
+  ```
+
+  <Note>
+    Tolerance is applied multiplicatively for memory constraints (loosens the threshold downward) and additively for utilization constraints (loosens the threshold upward). For example, `--tolerance=10` with `--max-gpu-utilization=60` accepts devices up to 70% utilization.
+  </Note>
+</ParamField>
+
+## Formatting options
+
+<ParamField path="--format" type="index | uuid" required={false}>
+  Output format for the selected device identifiers. Defaults to `index`.
+
+  Also available as `-O`.
+
+  | Value | Output |
+  |-------|--------|
+  | `index` | Integer device indices, e.g. `6,5,4,3` |
+  | `uuid` | Full UUID strings, e.g. `GPU-849d5a8d-...` |
+
+  <Note>
+    When MIG devices are present and `--format=index` is set, the output automatically falls back to `uuid` to avoid ambiguity.
+  </Note>
+
+  ```bash
+  nvisel -O uuid -c 2 -f 5000M
+  ```
+</ParamField>
+
+<ParamField path="--sep" type="SEP" required={false}>
+  Separator string between identifiers. Defaults to `,`.
+
+  Also available as `--separator` and `-s`. Mutually exclusive with `--newline` and `--null`.
+
+  ```bash
+  nvisel --sep " "   # space-separated
+  ```
+</ParamField>
+
+<ParamField path="--newline" type="flag" required={false}>
+  Use a newline character as the separator. Equivalent to `--sep=$'\n'`. Useful for piping each identifier to a separate command.
+
+  ```bash
+  nvisel --newline -O uuid -C 6 -f 8GiB
+  ```
+</ParamField>
+
+<ParamField path="--null" type="flag" required={false}>
+  Use a null byte (`\x00`) as the separator. Corresponds to the `-0` option of `xargs`.
+
+  Short form: `-0`
+
+  ```bash
+  nvisel -0 -O uuid -c 2 -f 4GiB | xargs -0 -I {} nvidia-smi --id={} --query-gpu=index,memory.free --format=csv
+  ```
+</ParamField>
+
+<ParamField path="--no-sort" type="flag" required={false}>
+  Disable the default sort by memory usage and GPU utilization. The output order then reflects the original device enumeration order.
+
+  Short form: `-S`
+
+  ```bash
+  nvisel -i -S   # normalize CUDA_VISIBLE_DEVICES without reordering
+  ```
+</ParamField>
+
+## Usage examples
+
+<CodeGroup>
+
+```bash Selecting by count
+# All devices, sorted
+nvisel
+
+# Exactly 4 devices
+nvisel -n 4
+
+# At least 2, at most 3 devices
+nvisel --min-count 2 --max-count 3
+```
+
+```bash Selecting by resource constraints
+# At least 5 GiB free memory, at most 3 devices
+nvisel --min-count 2 --max-count 3 --min-free-memory 5GiB
+
+# At least 1 device with 10 GiB free, set CUDA_VISIBLE_DEVICES
+export CUDA_DEVICE_ORDER="PCI_BUS_ID"
+export CUDA_VISIBLE_DEVICES="$(nvisel -c 1 -f 10GiB)"
+
+# UUID output for use with CUDA_VISIBLE_DEVICES
+export CUDA_VISIBLE_DEVICES="$(nvisel -O uuid -c 2 -f 5000M)"
+```
+
+```bash Piping to other tools
+# Print one UUID per line
+nvisel --newline -O uuid -C 6 -f 8GiB
+
+# Pipe null-separated UUIDs to nvidia-smi
+nvisel -0 -O uuid -c 2 -f 4GiB \
+  | xargs -0 -I {} nvidia-smi --id={} \
+      --query-gpu=index,memory.free --format=csv
+```
+
+```bash Normalizing CUDA_VISIBLE_DEVICES
+# Convert abbreviated UUIDs to full UUIDs (no reordering)
+nvisel -i "GPU-18ef14e9,GPU-849d5a8d" -S -O uuid --newline
+
+# Convert UUIDs to integer indices
+nvisel -i "GPU-18ef14e9,GPU-849d5a8d" -S
+```
+
+</CodeGroup>
+
+## Python API
+
+You can call `select_devices` directly from Python to set `CUDA_VISIBLE_DEVICES` at the top of your training script.
+
+```python
+import os
+from nvitop import select_devices
+
+os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(
+    select_devices(format='uuid', min_count=4, min_free_memory='8GiB')
+)
+```
+
+`select_devices` accepts the same constraints as the CLI:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `devices` | `Iterable[Device] \| None` | Candidate device pool. Defaults to all devices. |
+| `format` | `'index'`, `'uuid'`, or `'device'` | Output format. |
+| `min_count` | `int` | Minimum devices to return. Default: `0`. |
+| `max_count` | `int \| None` | Maximum devices to return. Default: all. |
+| `min_free_memory` | `int \| str \| None` | Minimum free memory in bytes or human-readable string. |
+| `min_total_memory` | `int \| str \| None` | Minimum total memory in bytes or human-readable string. |
+| `max_gpu_utilization` | `int \| None` | Maximum GPU utilization percentage. |
+| `max_memory_utilization` | `int \| None` | Maximum memory bandwidth utilization percentage. |
+| `tolerance` | `int` | Constraint tolerance in percentage. Default: `10`. |
+| `free_accounts` | `list[str] \| None` | Users whose GPU memory is treated as free. |
+| `sort` | `bool` | Sort by free memory desc and utilization asc. Default: `True`. |
+
+<Warning>
+  `nvisel` exits with a non-zero status code when the `--min-count` constraint cannot be satisfied. In shell scripts, check `$?` or use `set -e` to handle this case.
+</Warning>

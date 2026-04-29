@@ -1,0 +1,309 @@
+---
+title: "nvitop CLI — flags, options, and examples"
+description: "Complete reference for every nvitop command-line flag, coloring options, device and process filters, and the NVITOP_MONITOR_MODE environment variable."
+---
+
+`nvitop` is invoked directly from your terminal and works in two modes: a **one-shot** query that prints current device and process status then exits, and a continuous **monitor** mode with an interactive TUI. All flags below apply to both modes unless otherwise noted.
+
+## Basic usage
+
+```bash
+# One-shot output (like nvidia-smi)
+nvitop --once
+
+# Monitor mode (auto-selected display)
+nvitop
+
+# Equivalent using the Python module
+python3 -m nvitop
+```
+
+<Tip>
+When `stdout` is a TTY and neither `--once` nor `--monitor` is supplied, nvitop automatically enters monitor mode.
+</Tip>
+
+## General options
+
+<ParamField path="--once" type="flag" required={false}>
+  Report query data only once, then exit. Mutually exclusive with `--monitor`.
+
+  Short form: `-1`
+
+  ```bash
+  nvitop -1
+  nvitop --once
+  ```
+</ParamField>
+
+<ParamField path="--monitor" type="auto | full | compact" required={false}>
+  Run as a resource monitor. Continuously updates and handles keyboard/mouse input.
+
+  Short form: `-m`
+
+  When the argument is omitted, the display mode is read from `NVITOP_MONITOR_MODE` (default fallback: `auto`).
+
+  | Value | Behavior |
+  |-------|----------|
+  | `auto` | Automatically picks `full` or `compact` based on terminal size |
+  | `full` | Always uses the full-width layout |
+  | `compact` | Always uses the compact layout |
+
+  ```bash
+  nvitop -m auto
+  nvitop -m full
+  nvitop -m compact
+  nvitop -m           # reads NVITOP_MONITOR_MODE
+  ```
+</ParamField>
+
+<ParamField path="--interval" type="positive float" required={false}>
+  Process status update interval in seconds. Default: `2`. Must be a positive number greater than zero.
+
+  ```bash
+  nvitop --interval 5
+  ```
+</ParamField>
+
+<ParamField path="--ascii" type="flag" required={false}>
+  Use ASCII characters only. Useful for terminals without Unicode support or when box-drawing characters render incorrectly.
+
+  Short forms: `--no-unicode`, `-U`
+
+  ```bash
+  nvitop -U
+  ```
+</ParamField>
+
+## Coloring options
+
+<ParamField path="--colorful" type="flag" required={false}>
+  Use gradient colors to produce spectrum-like bar charts. Requires a terminal that supports 256 colors. You may need to set `TERM="xterm-256color"`.
+
+  <Note>
+    Terminal multiplexers such as `tmux` may override the `TERM` variable and prevent 256-color mode from activating.
+  </Note>
+
+  ```bash
+  TERM="xterm-256color" nvitop --colorful
+  ```
+</ParamField>
+
+<ParamField path="--force-color" type="flag" required={false}>
+  Force colorized output even when `stdout` is not a TTY terminal (for example, when piping to a pager).
+
+  ```bash
+  nvitop --force-color | less -R
+  ```
+</ParamField>
+
+<ParamField path="--light" type="flag" required={false}>
+  Tweak visual output for light-theme terminals. Adjusts contrast so text remains readable on white or light backgrounds.
+
+  ```bash
+  nvitop --light
+  ```
+
+  <Tip>
+    For a permanent setting, add `export NVITOP_MONITOR_MODE="light"` to your shell startup file instead.
+  </Tip>
+</ParamField>
+
+<ParamField path="--gpu-util-thresh" type="th1 th2" required={false}>
+  Two integer thresholds (1–99) that determine GPU utilization coloring intensity.
+
+  Coloring rule: `light < th1% ≤ moderate < th2% ≤ heavy`
+
+  Defaults: `10 75`
+
+  ```bash
+  nvitop --gpu-util-thresh 20 80
+  ```
+</ParamField>
+
+<ParamField path="--mem-util-thresh" type="th1 th2" required={false}>
+  Two integer thresholds (1–99) that determine GPU memory utilization coloring intensity.
+
+  Coloring rule: `light < th1% ≤ moderate < th2% ≤ heavy`
+
+  Defaults: `10 80`
+
+  ```bash
+  nvitop --mem-util-thresh 15 85
+  ```
+</ParamField>
+
+## Device filtering
+
+<ParamField path="--only" type="INDEX [INDEX ...]" required={false}>
+  Show only the specified devices by their integer indices. When this flag is present, `--only-visible` is suppressed.
+
+  Short form: `-o`
+
+  ```bash
+  nvitop -o 0 1        # show GPU 0 and GPU 1 only
+  nvitop --only 2 3 4  # show GPUs 2, 3, and 4 only
+  ```
+</ParamField>
+
+<ParamField path="--only-visible" type="flag" required={false}>
+  Show only the devices listed in the `CUDA_VISIBLE_DEVICES` environment variable. Accepts both integer indices and UUID strings.
+
+  Short form: `-ov`
+
+  ```bash
+  CUDA_VISIBLE_DEVICES="0,2" nvitop -ov
+  ```
+</ParamField>
+
+## Process filtering
+
+These flags narrow which GPU processes appear in the display. Multiple filters stack (all conditions must be satisfied).
+
+<ParamField path="--compute" type="flag" required={false}>
+  Show only GPU processes that include a compute context. Matches process types `C` or `C+G`.
+
+  Short form: `-c`
+
+  ```bash
+  nvitop -c
+  ```
+</ParamField>
+
+<ParamField path="--only-compute" type="flag" required={false}>
+  Show only GPU processes with an *exclusively* compute context. Matches type `C` only — excludes combined `C+G` processes.
+
+  Short form: `-C`
+
+  ```bash
+  nvitop -C
+  ```
+</ParamField>
+
+<ParamField path="--graphics" type="flag" required={false}>
+  Show only GPU processes that include a graphics context. Matches process types `G` or `C+G`.
+
+  Short form: `-g`
+
+  ```bash
+  nvitop -g
+  ```
+</ParamField>
+
+<ParamField path="--only-graphics" type="flag" required={false}>
+  Show only GPU processes with an *exclusively* graphics context. Matches type `G` only — excludes combined `C+G` processes.
+
+  Short form: `-G`
+
+  ```bash
+  nvitop -G
+  ```
+</ParamField>
+
+<ParamField path="--user" type="USERNAME [USERNAME ...]" required={false}>
+  Show only processes belonging to the specified users. When the flag is given without arguments, it defaults to the current user (`$USER`).
+
+  Short form: `-u`
+
+  ```bash
+  nvitop -u alice bob   # processes owned by alice or bob
+  nvitop -u             # processes owned by the current user
+  ```
+</ParamField>
+
+<ParamField path="--pid" type="PID [PID ...]" required={false}>
+  Show only processes matching the given process IDs.
+
+  Short form: `-p`
+
+  ```bash
+  nvitop -p 12345 67890
+  ```
+</ParamField>
+
+## Environment variables
+
+These variables configure default behavior without requiring flags on every invocation. Add them to your shell startup file for permanent settings.
+
+| Variable | Description | Valid values | Default |
+|----------|-------------|--------------|---------|
+| `NVITOP_MONITOR_MODE` | Default display mode (comma-separated) | `auto` / `full` / `compact`<br/>`plain` / `colorful`<br/>`dark` / `light` | `auto,plain,dark` |
+| `NVITOP_GPU_UTILIZATION_THRESHOLDS` | GPU utilization thresholds | `10,75` or any `th1,th2` | `10,75` |
+| `NVITOP_MEMORY_UTILIZATION_THRESHOLDS` | GPU memory utilization thresholds | `10,80` or any `th1,th2` | `10,80` |
+| `LOGLEVEL` | Log level for internal messages | `DEBUG`, `INFO`, `WARNING`, … | `WARNING` |
+
+<CodeGroup>
+
+```bash bash / zsh
+export NVITOP_MONITOR_MODE="full,light"
+nvitop
+```
+
+```fish fish
+set -gx NVITOP_MONITOR_MODE "full,light"
+nvitop
+```
+
+```powershell PowerShell
+$Env:NVITOP_MONITOR_MODE = "full,light"
+nvitop
+```
+
+</CodeGroup>
+
+<Note>
+  The `NVITOP_MONITOR_MODE` value is a comma-separated string. You can combine the display mode (`auto`/`full`/`compact`), color palette (`plain`/`colorful`), and theme (`dark`/`light`). For example: `"full,colorful,light"`.
+</Note>
+
+## Usage examples
+
+<CodeGroup>
+
+```bash One-shot queries
+# All devices
+nvitop -1
+
+# Only GPU 0 and GPU 1
+nvitop -1 -o 0 1
+
+# Only devices in CUDA_VISIBLE_DEVICES
+nvitop -1 -ov
+
+# Only compute processes
+nvitop -1 -c
+```
+
+```bash Monitor mode
+# Auto display, default settings
+nvitop
+
+# Full mode with light theme
+nvitop -m full --light
+
+# Compact mode, only show GPU 2
+nvitop -m compact -o 2
+
+# ASCII mode (no Unicode)
+nvitop -U
+
+# Spectrum bar charts (256-color terminal)
+nvitop --colorful
+```
+
+```bash Docker
+docker run -it --rm \
+  --runtime=nvidia \
+  --gpus=all \
+  --pid=host \
+  ghcr.io/xuehaipan/nvitop:latest
+```
+
+```bash SSH sessions
+ssh user@host -t nvitop
+ssh user@host -t '~/.local/bin/nvitop'
+```
+
+</CodeGroup>
+
+<Warning>
+  When running `nvitop` inside a Docker container, you must pass `--pid=host` so that host process information is visible.
+</Warning>

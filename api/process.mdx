@@ -1,0 +1,272 @@
+---
+title: "Process API — nvitop GpuProcess, HostProcess Guide"
+description: "Reference for nvitop's GpuProcess and HostProcess classes: GPU memory, utilization, CPU stats, snapshots, and the command_join utility function."
+---
+
+The process module exposes two live process classes. `HostProcess` wraps `psutil.Process` with caching and snapshot support. `GpuProcess` pairs a host process with the GPU device it is running on, adding GPU-specific metrics such as video memory consumption and SM utilization.
+
+Both classes use an instance cache keyed on PID (and device, for `GpuProcess`): constructing the same PID twice returns the exact same object.
+
+<Note>
+`GpuProcess` automatically delegates missing attribute lookups to its `HostProcess`, so you can call `process.name()`, `process.status()`, `process.cwd()`, and all other `psutil.Process` methods directly on a `GpuProcess` instance.
+</Note>
+
+## HostProcess
+
+```python
+class HostProcess(psutil.Process):
+    def __new__(cls, pid: int | None = None) -> HostProcess: ...
+```
+
+Represents a single OS process. If `pid` is omitted, uses the current process (`os.getpid()`). Instances are cached for the process lifetime — two calls with the same PID return `is` identical objects.
+
+### Key methods
+
+<ResponseField name="username() -> str">
+  Name of the user that owns the process. On Windows, strips the domain prefix.
+</ResponseField>
+
+<ResponseField name="cmdline() -> list[str]">
+  The command line as a list of argument strings.
+</ResponseField>
+
+<ResponseField name="command() -> str">
+  Shell-escaped single string built from `cmdline()`. Suitable for display.
+</ResponseField>
+
+<ResponseField name="running_time() -> datetime.timedelta">
+  Wall-clock elapsed time since the process was created.
+</ResponseField>
+
+<ResponseField name="running_time_human() -> str">
+  Human-readable elapsed time, e.g. `'46:13:33'` or `'2.1 days'`.
+</ResponseField>
+
+<ResponseField name="running_time_in_seconds() -> float">
+  Elapsed time in seconds.
+</ResponseField>
+
+<ResponseField name="rss_memory() -> int">
+  Resident Set Size (RSS) memory in bytes.
+</ResponseField>
+
+<ResponseField name="as_snapshot(attrs=None, ad_value=None) -> Snapshot">
+  Captures a one-time snapshot of all process attributes.
+</ResponseField>
+
+<ResponseField name="oneshot() -> contextmanager">
+  Context manager that batches multiple info queries into a single syscall, dramatically reducing overhead when you read several attributes at once.
+</ResponseField>
+
+---
+
+## GpuProcess
+
+```python
+class GpuProcess:
+    def __new__(
+        cls,
+        pid: int | None,
+        device: Device,
+        *,
+        gpu_memory: int | NaType | None = None,
+        gpu_instance_id: int | NaType | None = None,
+        compute_instance_id: int | NaType | None = None,
+        type: str | NaType | None = None,
+    ) -> GpuProcess: ...
+```
+
+Represents a process running on a specific GPU device. The same PID can appear in multiple `GpuProcess` instances if the host process uses more than one GPU — each `(pid, device)` pair is a distinct instance.
+
+### Properties
+
+<ResponseField name="pid" type="int">
+  The process identifier.
+</ResponseField>
+
+<ResponseField name="host" type="HostProcess">
+  The corresponding `HostProcess` instance on the host.
+</ResponseField>
+
+<ResponseField name="device" type="Device">
+  The GPU device this process is running on.
+</ResponseField>
+
+<ResponseField name="type" type="str | NaType">
+  The GPU context type: `'C'` (compute), `'G'` (graphics), `'C+G'` (both), or `NA`.
+</ResponseField>
+
+### GPU metrics
+
+<ResponseField name="gpu_memory() -> int | NaType">
+  Used GPU memory in bytes.
+</ResponseField>
+
+<ResponseField name="gpu_memory_human() -> str | NaType">
+  Used GPU memory as a human-readable string, e.g. `'1031MiB'`.
+</ResponseField>
+
+<ResponseField name="gpu_memory_percent() -> float | NaType">
+  GPU memory used as a percentage of the device's total memory.
+</ResponseField>
+
+<ResponseField name="gpu_sm_utilization() -> int | NaType">
+  Utilization rate of the Streaming Multiprocessors (SM) in percentage.
+</ResponseField>
+
+<ResponseField name="gpu_memory_utilization() -> int | NaType">
+  Utilization rate of the GPU memory bandwidth in percentage.
+</ResponseField>
+
+<ResponseField name="gpu_encoder_utilization() -> int | NaType">
+  Video encoder utilization rate in percentage.
+</ResponseField>
+
+<ResponseField name="gpu_decoder_utilization() -> int | NaType">
+  Video decoder utilization rate in percentage.
+</ResponseField>
+
+### Host metrics (delegated from HostProcess)
+
+<ResponseField name="username() -> str | NaType">
+  Name of the user owning the process.
+</ResponseField>
+
+<ResponseField name="name() -> str | NaType">
+  Process name.
+</ResponseField>
+
+<ResponseField name="cmdline() -> list[str]">
+  Command line as a list of argument strings.
+</ResponseField>
+
+<ResponseField name="command() -> str">
+  Shell-escaped command string.
+</ResponseField>
+
+<ResponseField name="cpu_percent() -> float | NaType">
+  CPU utilization as a percentage.
+</ResponseField>
+
+<ResponseField name="host_memory() -> int | NaType">
+  Resident Set Size (RSS) memory in bytes.
+</ResponseField>
+
+<ResponseField name="host_memory_human() -> str | NaType">
+  RSS memory as a human-readable string.
+</ResponseField>
+
+<ResponseField name="memory_percent() -> float | NaType">
+  RSS as a percentage of total system memory. Aliased as `host_memory_percent`.
+</ResponseField>
+
+<ResponseField name="running_time() -> datetime.timedelta | NaType">
+  Wall-clock elapsed time since process creation.
+</ResponseField>
+
+<ResponseField name="running_time_human() -> str | NaType">
+  Human-readable elapsed time.
+</ResponseField>
+
+<ResponseField name="running_time_in_seconds() -> float | NaType">
+  Elapsed time in seconds.
+</ResponseField>
+
+### Snapshots
+
+#### `as_snapshot() -> Snapshot`
+
+Captures a one-time snapshot of all GPU and host attributes for this process. The returned `Snapshot` object has every attribute as a plain Python value — no further method calls needed.
+
+```python
+snap = process.as_snapshot()
+print(snap.gpu_memory_human)   # '1031MiB'
+print(snap.cpu_percent)        # 98.5
+print(snap.command)            # 'python3 rllib_train.py'
+```
+
+#### `GpuProcess.take_snapshots(gpu_processes, *, failsafe=False) -> list[Snapshot]`
+
+Batched class method. Takes snapshots for a list of `GpuProcess` instances, sharing host-process query results across processes with the same PID to avoid duplicate syscalls.
+
+<ParamField path="gpu_processes" type="Iterable[GpuProcess]" required>
+  The processes to snapshot.
+</ParamField>
+
+<ParamField path="failsafe" type="bool" default="False">
+  When `True`, methods that raise `psutil` exceptions return fallback values (usually `NA`) instead of propagating the exception. Useful when processes may terminate during collection.
+</ParamField>
+
+```python
+from nvitop import Device, GpuProcess
+
+device = Device(0)
+procs  = device.processes()   # dict[int, GpuProcess]
+
+snapshots = GpuProcess.take_snapshots(procs.values(), failsafe=True)
+snapshots.sort(key=lambda s: (s.username, s.pid))
+
+for snap in snapshots:
+    print(f'{snap.pid:<6} {snap.username:<12} {snap.gpu_memory_human:>8}  {snap.command}')
+```
+
+### `failsafe` context manager
+
+```python
+with GpuProcess.failsafe():
+    print(process.cpu_percent())   # returns NA instead of raising if process is gone
+```
+
+---
+
+## command_join
+
+```python
+def command_join(cmdline: list[str]) -> str: ...
+```
+
+Returns a shell-escaped string from a list of command line arguments, suitable for display. On POSIX systems it uses single-quoting; on Windows it uses double-quoting with `^` escaping.
+
+```python
+from nvitop import command_join
+
+command_join(['python3', 'train.py', '--lr', '1e-3'])
+# "python3 train.py --lr 1e-3"
+
+command_join(['bash', '-c', 'echo hello world'])
+# "bash -c 'echo hello world'"
+```
+
+---
+
+## Full example
+
+```python
+import time
+from nvitop import Device, GpuProcess, NA, colored
+
+devices = Device.cuda.all()
+
+for device in devices:
+    processes = device.processes()
+    print(colored(str(device), color='green', attrs=('bold',)))
+    print(f'  Used memory : {device.memory_used_human()}')
+    print(f'  GPU util    : {device.gpu_utilization()}%')
+
+    if processes:
+        snapshots = GpuProcess.take_snapshots(processes.values(), failsafe=True)
+        snapshots.sort(key=lambda s: (s.username, s.pid))
+
+        for snap in snapshots:
+            gpu_mem = snap.gpu_memory_human if snap.gpu_memory_human is not NA else 'WDDM:N/A'
+            print(
+                f'    [{snap.pid}] {snap.username:<10}'
+                f'  CPU:{snap.cpu_percent:>5}%'
+                f'  GPU-MEM:{gpu_mem:>8}'
+                f'  SM:{snap.gpu_sm_utilization}%'
+                f'  {snap.command}'
+            )
+    else:
+        print('  - No Running Processes')
+    print('-' * 80)
+```

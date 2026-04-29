@@ -1,0 +1,158 @@
+---
+title: "Install nvitop on Linux, macOS, and Windows"
+description: "Install nvitop via uvx, pipx, pip, or conda. Covers shell alias setup, PATH fixes, Windows curses support, and the NVIDIA driver installer script."
+---
+
+nvitop can be installed in several ways depending on how you plan to use it. For a quick one-off run with no installation side effects, use `uvx` or `pipx`. For a permanent install you can call from any shell, use `pip` or `conda`. All methods ultimately install the same package from PyPI or conda-forge.
+
+## Install methods
+
+<CodeGroup>
+
+```bash uvx (recommended)
+# Run nvitop without installing it globally
+uvx nvitop
+
+# Or use uv tool run
+uv tool run nvitop
+```
+
+```bash pipx
+# Run nvitop without installing it globally
+pipx run nvitop
+```
+
+```bash pip
+pip3 install --upgrade nvitop
+```
+
+```bash conda
+conda install -c conda-forge nvitop
+```
+
+```bash From GitHub (latest unreleased)
+# Install the latest commit from the main branch
+pip3 install --upgrade pip setuptools
+pip3 install git+https://github.com/XuehaiPan/nvitop.git#egg=nvitop
+```
+
+```bash From source
+git clone --depth=1 https://github.com/XuehaiPan/nvitop.git
+cd nvitop
+pip3 install .
+```
+
+</CodeGroup>
+
+<Note>
+  Installing inside an isolated virtual environment (via `uvx`, `pipx`, or a dedicated `venv`) is strongly recommended. This avoids dependency conflicts with `nvidia-ml-py`, which is not backward-compatible across releases and may need to be pinned to a version that matches your NVIDIA driver.
+</Note>
+
+## Set up a shell alias for uvx or pipx
+
+If you use `uvx` or `pipx run`, you can add an alias to your shell startup file so that typing `nvitop` in any terminal invokes the isolated version automatically.
+
+<Tabs>
+  <Tab title="Bash">
+    ```bash
+    # uvx alias
+    echo 'alias nvitop="uvx nvitop"' >> ~/.bashrc
+
+    # pipx alias
+    echo 'alias nvitop="pipx run nvitop"' >> ~/.bashrc
+    ```
+
+    Reload with `source ~/.bashrc` or open a new terminal.
+  </Tab>
+  <Tab title="Zsh">
+    ```zsh
+    # uvx alias
+    echo 'alias nvitop="uvx nvitop"' >> ~/.zshrc
+
+    # pipx alias
+    echo 'alias nvitop="pipx run nvitop"' >> ~/.zshrc
+    ```
+
+    Reload with `source ~/.zshrc` or open a new terminal.
+  </Tab>
+  <Tab title="Fish">
+    ```fish
+    # uvx alias
+    mkdir -p ~/.config/fish
+    echo 'alias nvitop="uvx nvitop"' >> ~/.config/fish/config.fish
+
+    # pipx alias
+    mkdir -p ~/.config/fish
+    echo 'alias nvitop="pipx run nvitop"' >> ~/.config/fish/config.fish
+    ```
+
+    Reload with `source ~/.config/fish/config.fish` or open a new terminal.
+  </Tab>
+  <Tab title="PowerShell">
+    ```powershell
+    # uvx alias
+    New-Item -Path (Split-Path -Parent -Path $PROFILE.CurrentUserAllHosts) -ItemType Directory -Force
+    'Function nvitop { uvx nvitop @Args }' >> $PROFILE.CurrentUserAllHosts
+
+    # pipx alias
+    New-Item -Path (Split-Path -Parent -Path $PROFILE.CurrentUserAllHosts) -ItemType Directory -Force
+    'Function nvitop { pipx run nvitop @Args }' >> $PROFILE.CurrentUserAllHosts
+    ```
+
+    Restart PowerShell for the change to take effect.
+  </Tab>
+</Tabs>
+
+## Fix "nvitop: command not found"
+
+After a `pip3 install` you may see this error if the Python console scripts directory is not on your `PATH`.
+
+<Warning>
+  If you see `nvitop: command not found` after a successful `pip3 install`, the console script was installed to a directory that is not in your `PATH` — typically `~/.local/bin` on Linux/macOS. Add it to your shell startup file:
+
+  ```bash
+  # Bash / Zsh
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc  # or ~/.zshrc
+
+  # Fish
+  fish_add_path ~/.local/bin
+  ```
+
+  Alternatively, invoke nvitop through Python directly:
+
+  ```bash
+  python3 -m nvitop
+  ```
+</Warning>
+
+## Windows: curses support
+
+On Windows, nvitop uses the `windows-curses` package (installed automatically as a dependency) which provides curses support via PDCurses.
+
+<Note>
+  Mouse support and certain visual behaviors may vary across Windows terminal emulators (for example, Windows Terminal vs. PowerShell's built-in console). If you encounter display issues, try using a different terminal or adding the `--ascii` flag to disable Unicode box-drawing characters.
+</Note>
+
+## Install the NVIDIA driver (Ubuntu Linux)
+
+The nvitop repository includes a Bash script that installs or upgrades the NVIDIA display driver on Ubuntu Linux. This is useful when setting up a new machine.
+
+```bash
+git clone --depth=1 https://github.com/XuehaiPan/nvitop.git
+cd nvitop
+
+# Desktop users: switch to a text console first (optional for SSH sessions)
+sudo chvt 3  # or press Ctrl+Left Alt+F3
+
+# Install a specific driver version from ppa:graphics-drivers
+bash install-nvidia-driver.sh --package=nvidia-driver-470
+
+# Install the latest available driver
+bash install-nvidia-driver.sh --latest
+```
+
+Run `bash install-nvidia-driver.sh --help` for all options.
+
+<Tip>
+  If you only need to run nvitop and already have an NVIDIA driver installed, you do not need this script. NVML is bundled with every NVIDIA display driver.
+</Tip>

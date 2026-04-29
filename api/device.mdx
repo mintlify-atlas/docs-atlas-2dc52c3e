@@ -1,0 +1,360 @@
+---
+title: "Device API — nvitop Physical and CUDA Device Classes"
+description: "Complete reference for nvitop's Device hierarchy: PhysicalDevice, MigDevice, CudaDevice, CudaMigDevice, and CUDA_VISIBLE_DEVICES parsing utilities."
+---
+
+The device module is the foundation of the nvitop API. It exposes live GPU state — memory, utilization, clocks, temperature, power, and running processes — through a class hierarchy rooted at `Device`. The actual concrete type returned by the constructor is determined automatically from the arguments you supply, so you rarely need to import the subclasses directly.
+
+## Class hierarchy
+
+```
+Device
+├── PhysicalDevice        # a physical GPU, constructed by integer index / UUID / bus_id
+└── MigDevice             # a MIG instance, constructed by (physical_index, mig_index) tuple
+
+CudaDevice  (alias: Device.cuda)
+└── CudaMigDevice         # a MIG instance visible to CUDA
+```
+
+`CudaDevice` enumerates devices according to `CUDA_VISIBLE_DEVICES`. Use it when you need CUDA ordinals to match what PyTorch, JAX, or TensorFlow see.
+
+<Tip>
+`Device.cuda` is an alias for `CudaDevice`. You can write `Device.cuda.all()` or `Device.cuda(0)` without importing `CudaDevice` separately.
+</Tip>
+
+## Constructing devices
+
+### `Device` — NVML ordinals
+
+The constructor returns different concrete subclasses depending on the argument:
+
+```python
+Device(index: int)               -> PhysicalDevice
+Device(index: (int, int))        -> MigDevice
+Device(uuid='GPU-xxxx...')       -> PhysicalDevice
+Device(uuid='MIG-xxxx...')       -> MigDevice
+Device(bus_id='00000000:06:00.0') -> PhysicalDevice
+```
+
+Exactly one keyword argument must be non-`None`; passing more than one raises `TypeError`.
+
+<CodeGroup>
+
+```python by index
+from nvitop import Device
+
+nvidia0 = Device(index=0)          # PhysicalDevice
+mig10   = Device(index=(1, 0))     # MigDevice (physical 1, MIG instance 0)
+```
+
+```python by UUID
+from nvitop import Device
+
+nvidia2 = Device(uuid='GPU-01234567-89ab-cdef-0123-456789abcdef')
+mig30   = Device(uuid='MIG-01234567-89ab-cdef-0123-456789abcdef')
+```
+
+```python by PCI bus ID
+from nvitop import Device
+
+dev = Device(bus_id='00000000:06:00.0')
+```
+
+</CodeGroup>
+
+### `CudaDevice` — CUDA ordinals
+
+`CudaDevice` respects `CUDA_VISIBLE_DEVICES` and `CUDA_DEVICE_ORDER`.
+
+```python
+CudaDevice(cuda_index: int)       -> CudaDevice or CudaMigDevice
+CudaDevice(nvml_index: int)       -> CudaDevice
+CudaDevice(nvml_index: (int,int)) -> CudaMigDevice
+CudaDevice(uuid: str)             -> CudaDevice or CudaMigDevice
+```
+
+```python
+import os
+from nvitop import CudaDevice, Device
+
+os.environ['CUDA_DEVICE_ORDER']   = 'PCI_BUS_ID'
+os.environ['CUDA_VISIBLE_DEVICES'] = '9,8,7,6'
+
+cuda0 = CudaDevice(0)              # CUDA ordinal 0 → NVML index 9
+cuda1 = CudaDevice(nvml_index=8)   # by NVML index
+cuda2 = CudaDevice(uuid='GPU-...') # by UUID
+
+# Equivalent using the Device.cuda alias:
+cuda4 = Device.cuda(4)
+```
+
+---
+
+## Class-level methods
+
+### `Device.all() -> list[PhysicalDevice]`
+
+Returns a list of all physical devices in the system.
+
+```python
+devices = Device.all()
+# [PhysicalDevice(index=0, ...), PhysicalDevice(index=1, ...), ...]
+```
+
+### `Device.count() -> int`
+
+Returns the number of NVIDIA GPUs present in the system.
+
+```python
+n = Device.count()   # e.g. 10
+```
+
+### `Device.driver_version() -> str | NaType`
+
+The version string of the installed NVIDIA display driver (e.g. `'525.60.11'`).
+
+### `Device.cuda_driver_version() -> str | NaType`
+
+The maximum CUDA version supported by the driver (e.g. `'12.0'`). This may differ from the CUDA Runtime version.
+
+### `Device.cuda_runtime_version() -> str | NaType`
+
+The CUDA Runtime version currently loaded (e.g. `'11.8'`). Returns `NA` when no runtime is available.
+
+### `Device.from_indices(indices) -> list`
+
+Returns devices by a list of NVML indices. Passing a mix of `int` and `(int, int)` returns `PhysicalDevice` and `MigDevice` instances respectively.
+
+### `Device.from_cuda_visible_devices() -> list[CudaDevice]`
+
+Returns all devices listed in `CUDA_VISIBLE_DEVICES`.
+
+### `Device.from_cuda_indices(cuda_indices) -> list[CudaDevice]`
+
+Returns devices by CUDA ordinals.
+
+### `CudaDevice.all() -> list[CudaDevice]`
+
+Shortcut for `Device.from_cuda_visible_devices()`.
+
+```python
+cuda_devices = CudaDevice.all()
+# or: Device.cuda.all()
+```
+
+### `CudaDevice.count() -> int`
+
+Number of devices visible to CUDA applications (length of `CUDA_VISIBLE_DEVICES`).
+
+---
+
+## Instance properties
+
+<ResponseField name="index" type="int | tuple[int, int]">
+  The NVML index of the device. Returns an `int` for physical devices and a `(int, int)` tuple for MIG devices.
+</ResponseField>
+
+<ResponseField name="nvml_index" type="int | tuple[int, int]">
+  Alias of `index`.
+</ResponseField>
+
+<ResponseField name="physical_index" type="int">
+  The physical device index. For MIG devices this is the parent physical device index.
+</ResponseField>
+
+<ResponseField name="cuda_index" type="int">
+  The CUDA ordinal of this device. Raises `RuntimeError` if the device is not visible to CUDA.
+</ResponseField>
+
+<ResponseField name="handle" type="c_nvmlDevice_t | None">
+  The raw NVML device handle. `None` if the GPU is lost or unavailable.
+</ResponseField>
+
+---
+
+## Instance methods
+
+### Identity and info
+
+<ResponseField name="name() -> str | NaType">
+  Official product name, e.g. `'GeForce RTX 2080 Ti'`.
+</ResponseField>
+
+<ResponseField name="uuid() -> str | NaType">
+  Globally unique immutable identifier, e.g. `'GPU-01234567-89ab-cdef-0123-456789abcdef'`.
+</ResponseField>
+
+<ResponseField name="bus_id() -> str | NaType">
+  PCI bus ID in `domain:bus:device.function` format (hex).
+</ResponseField>
+
+### Memory
+
+<ResponseField name="memory_total() -> int | NaType">
+  Total installed GPU memory in bytes.
+</ResponseField>
+
+<ResponseField name="memory_used() -> int | NaType">
+  Total memory allocated by active contexts, in bytes.
+</ResponseField>
+
+<ResponseField name="memory_free() -> int | NaType">
+  Unallocated memory, in bytes.
+</ResponseField>
+
+<ResponseField name="memory_total_human() -> str | NaType">
+  Human-readable total memory, e.g. `'11019MiB'`.
+</ResponseField>
+
+<ResponseField name="memory_used_human() -> str | NaType">
+  Human-readable used memory, e.g. `'8862MiB'`.
+</ResponseField>
+
+<ResponseField name="memory_free_human() -> str | NaType">
+  Human-readable free memory, e.g. `'2157MiB'`.
+</ResponseField>
+
+<ResponseField name="memory_percent() -> float | NaType">
+  Percentage of used memory over total (`0 ≤ p ≤ 100`).
+</ResponseField>
+
+<ResponseField name="memory_usage() -> str">
+  Combined string in `'used / total'` format, e.g. `'1041MiB / 11019MiB'`.
+</ResponseField>
+
+<ResponseField name="memory_info() -> MemoryInfo">
+  Named tuple `MemoryInfo(total, free, used, reserved)` with all values in bytes.
+</ResponseField>
+
+### Utilization
+
+<ResponseField name="gpu_utilization() -> int | NaType">
+  Percent of time during which one or more kernels were executing on the GPU over the last sample period.
+</ResponseField>
+
+<ResponseField name="memory_utilization() -> int | NaType">
+  Percent of time during which global device memory was being read or written.
+</ResponseField>
+
+<ResponseField name="encoder_utilization() -> int | NaType">
+  Video encoder utilization rate as a percentage.
+</ResponseField>
+
+<ResponseField name="decoder_utilization() -> int | NaType">
+  Video decoder utilization rate as a percentage.
+</ResponseField>
+
+<ResponseField name="utilization_rates() -> UtilizationRates">
+  Named tuple `UtilizationRates(gpu, memory, encoder, decoder)` in percentage.
+</ResponseField>
+
+### Thermal and power
+
+<ResponseField name="temperature() -> int | NaType">
+  Core GPU temperature in degrees Celsius.
+</ResponseField>
+
+<ResponseField name="fan_speed() -> int | NaType">
+  Fan speed as a percentage of the product's maximum noise tolerance fan speed.
+</ResponseField>
+
+<ResponseField name="power_usage() -> int | NaType">
+  Last measured power draw for the board in milliwatts (mW).
+</ResponseField>
+
+<ResponseField name="power_limit() -> int | NaType">
+  Software power limit in milliwatts (mW).
+</ResponseField>
+
+### Clocks
+
+<ResponseField name="clock_infos() -> ClockInfos">
+  Named tuple `ClockInfos(graphics, sm, memory, video)` with current clocks in MHz.
+</ResponseField>
+
+<ResponseField name="max_clock_infos() -> ClockInfos">
+  Named tuple with maximum clocks in MHz.
+</ResponseField>
+
+<ResponseField name="sm_clock() -> int | NaType">
+  Current SM (Streaming Multiprocessor) clock in MHz.
+</ResponseField>
+
+<ResponseField name="memory_clock() -> int | NaType">
+  Current memory clock in MHz.
+</ResponseField>
+
+### Processes and snapshots
+
+<ResponseField name="processes() -> dict[int, GpuProcess]">
+  Returns a mapping from PID to `GpuProcess` for all processes currently using this device.
+</ResponseField>
+
+<ResponseField name="as_snapshot() -> Snapshot">
+  Captures a one-time immutable snapshot of all device attributes. Access fields via attribute or `snapshot['field']` syntax.
+</ResponseField>
+
+---
+
+## CUDA_VISIBLE_DEVICES helpers
+
+### `parse_cuda_visible_devices(cuda_visible_devices=<env>) -> list[int] | list[tuple[int, int]]`
+
+Parses a `CUDA_VISIBLE_DEVICES` value into a list of NVML device indices.
+
+<ParamField path="cuda_visible_devices" type="str | None" optional>
+  The value to parse. If omitted, reads from the environment. If explicitly `None`, parses as if the environment variable is unset.
+</ParamField>
+
+```python
+from nvitop import parse_cuda_visible_devices
+
+# With CUDA_VISIBLE_DEVICES='3,2,1,0'
+indices = parse_cuda_visible_devices()
+# [3, 2, 1, 0]
+```
+
+### `normalize_cuda_visible_devices(cuda_visible_devices=<env>) -> str`
+
+Parses `CUDA_VISIBLE_DEVICES` and returns a canonical comma-separated string of GPU UUIDs. Useful for locking a device set across subprocess boundaries regardless of index renaming.
+
+```python
+from nvitop import normalize_cuda_visible_devices
+
+normalized = normalize_cuda_visible_devices()
+# 'GPU-aaaaaaaa-...,GPU-bbbbbbbb-...'
+```
+
+---
+
+## Full example from the README
+
+```python
+import os
+from nvitop import Device, CudaDevice, parse_cuda_visible_devices, normalize_cuda_visible_devices
+
+os.environ['CUDA_DEVICE_ORDER']    = 'PCI_BUS_ID'
+os.environ['CUDA_VISIBLE_DEVICES'] = '9,8,7,6'
+
+print(Device.driver_version())         # '525.60.11'
+print(Device.cuda_driver_version())    # '12.0'
+print(Device.cuda_runtime_version())   # '11.8'
+print(Device.count())                  # 10
+print(CudaDevice.count())             # 4  (Device.cuda.count())
+
+all_devices      = Device.all()
+nvidia0, nvidia1 = Device.from_indices([0, 1])
+
+cuda_all = CudaDevice.all()
+# [CudaDevice(cuda_index=0, nvml_index=9, ...), ...]
+
+nvidia0 = Device(0)
+print(nvidia0.memory_used())           # 9293398016   (bytes)
+print(nvidia0.memory_used_human())     # '8862MiB'
+print(nvidia0.gpu_utilization())       # 5  (%)
+
+procs = nvidia0.processes()            # dict[int, GpuProcess]
+snap  = nvidia1.as_snapshot()
+print(snap.memory_percent)             # 9.5
+print(snap['memory_info'])             # MemoryInfo(...)
+```

@@ -1,0 +1,158 @@
+---
+title: "GPU metrics with Prometheus and Grafana"
+description: "Export real-time GPU metrics from nvitop to Prometheus and visualize them in a prebuilt Grafana dashboard, with a Docker Compose quickstart for the full stack."
+---
+
+`nvitop-exporter` is a Prometheus exporter built on top of `nvitop`. It exposes the same rich GPU and process metrics that `nvitop` collects — utilization, memory, temperature, power, and more — as a Prometheus-compatible HTTP endpoint that you can scrape on any interval.
+
+## Install and start the exporter
+
+You do not need to install `nvitop-exporter` permanently. The fastest approach is to run it directly with `uvx` or `pipx`:
+
+<CodeGroup>
+  ```bash uvx
+  uvx nvitop-exporter --bind-address 0.0.0.0 --port 5050
+  ```
+
+  ```bash pipx
+  pipx run nvitop-exporter --bind-address 0.0.0.0 --port 5050
+  ```
+
+  ```bash pip
+  pip install nvitop-exporter
+  nvitop-exporter --bind-address 0.0.0.0 --port 5050
+  ```
+</CodeGroup>
+
+Once running, the metrics endpoint is available at [http://localhost:5050/metrics](http://localhost:5050/metrics).
+
+<Note>
+  `nvitop-exporter` requires Python 3.8+ and depends on `nvitop ~= 1.6.2` and
+  `prometheus-client >= 0.4.0`, which are installed automatically.
+</Note>
+
+## Configure Prometheus
+
+Add a scrape job to your `prometheus.yml` to tell Prometheus where to find the exporter:
+
+```yaml
+scrape_configs:
+  - job_name: 'nvitop-exporter'
+    static_configs:
+      - targets: ['localhost:5050']
+```
+
+If you are running Prometheus and `nvitop-exporter` as separate containers on the same Docker network, replace `localhost` with the service name (for example, `nvitop-exporter:5050`).
+
+## Import the Grafana dashboard
+
+A prebuilt dashboard is available to visualize the metrics collected by `nvitop-exporter`.
+
+<Steps>
+  <Step title="Open the Grafana import dialog">
+    In Grafana, go to **Dashboards → Import**.
+  </Step>
+
+  <Step title="Import by ID or from file">
+    Choose one of two methods:
+
+    - **By Grafana dashboard ID**: Enter `22589` and click **Load**. Grafana fetches the dashboard from grafana.com automatically.
+    - **From a local file**: Upload `nvitop-exporter/grafana/dashboard.json` from the repository.
+  </Step>
+
+  <Step title="Select your Prometheus data source">
+    On the import form, select the Prometheus data source that is scraping `nvitop-exporter`, then click **Import**.
+  </Step>
+</Steps>
+
+## Docker Compose quickstart
+
+The repository ships a complete Docker Compose stack that starts Prometheus, Grafana, and `nvitop-exporter` together. This is the fastest way to get the full dashboard running.
+
+<Steps>
+  <Step title="Start the stack">
+    From the root of the cloned repository, run:
+
+    ```bash
+    docker compose --project-directory=nvitop-exporter/grafana up --build --detach
+    ```
+
+    This brings up three services:
+
+    | Service | Image | Purpose |
+    |---------|-------|---------|
+    | `nvitop-exporter` | `ghcr.io/xuehaipan/nvitop-exporter:latest` | Collects GPU metrics |
+    | `prometheus` | `prom/prometheus:latest` | Scrapes and stores metrics |
+    | `grafana` | Custom build | Visualizes metrics |
+  </Step>
+
+  <Step title="Open the dashboard">
+    Navigate to [http://localhost:3000](http://localhost:3000). Grafana is pre-configured with anonymous admin access and the `nvitop-exporter` dashboard provisioned automatically.
+  </Step>
+</Steps>
+
+The Compose file that powers this stack:
+
+```yaml
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_storage:/var/lib/prometheus
+    restart: unless-stopped
+
+  grafana:
+    build:
+      dockerfile: Dockerfile
+      context: .
+    volumes:
+      - ./datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+      - ./dashboard.yml:/etc/grafana/provisioning/dashboards/dashboard.yml
+      - grafana_storage:/var/lib/grafana
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    ports:
+      - 3000:3000
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  nvitop-exporter:
+    image: ghcr.io/xuehaipan/nvitop-exporter:latest
+    command: ["--bind-address", "0.0.0.0", "--port", "5050"]
+    pid: host
+    restart: unless-stopped
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+
+volumes:
+  prometheus_storage: {}
+  grafana_storage: {}
+```
+
+<Warning>
+  The `nvitop-exporter` service in the Compose file uses `pid: host` and
+  `runtime: nvidia`. Both are required — `pid: host` so the exporter can see all
+  GPU processes on the host, and `runtime: nvidia` to expose the GPU devices inside
+  the container. See the [Docker guide](/guides/docker) for details.
+</Warning>
+
+The bundled Prometheus configuration scrapes `nvitop-exporter` every two seconds:
+
+```yaml
+global:
+  scrape_interval: 2s
+  evaluation_interval: 2s
+
+scrape_configs:
+  - job_name: "nvitop-exporter"
+    static_configs:
+      - targets: ["nvitop-exporter:5050"]
+```

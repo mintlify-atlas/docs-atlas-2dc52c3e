@@ -1,0 +1,90 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "nvitop",
+  "projectDescription": "An interactive NVIDIA-GPU process viewer and Python library for GPU monitoring, process management, and resource metric collection.",
+  "theme": "aspen",
+  "primaryColor": "#5d6c75",
+  "lightColor": "#b5bec1",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "cli/nvitop",
+              "cli/nvisel",
+              "cli/keybindings"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/docker",
+              "guides/ssh",
+              "guides/environment-variables",
+              "guides/prometheus-grafana"
+            ]
+          },
+          {
+            "group": "Python API",
+            "pages": [
+              "api/overview",
+              "api/device",
+              "api/process",
+              "api/collector",
+              "api/utils"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/keras",
+              "integrations/pytorch-lightning",
+              "integrations/tensorboard"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Interactive TUI monitor with real-time GPU/process status",
+    "Tree-view, filtering, process signals, and environment variable inspection",
+    "nvisel CLI for automatic CUDA_VISIBLE_DEVICES selection",
+    "Python API for Device, GpuProcess, and ResourceMetricCollector",
+    "Prometheus exporter (nvitop-exporter) with Grafana dashboard",
+    "Callbacks for Keras, PyTorch Lightning, and TensorBoard",
+    "MIG device support",
+    "Cross-platform: Linux and Windows"
+  ],
+  "publicApiSurface": [
+    "nvitop.Device",
+    "nvitop.CudaDevice",
+    "nvitop.PhysicalDevice",
+    "nvitop.MigDevice",
+    "nvitop.CudaMigDevice",
+    "nvitop.GpuProcess",
+    "nvitop.HostProcess",
+    "nvitop.ResourceMetricCollector",
+    "nvitop.take_snapshots",
+    "nvitop.collect_in_background",
+    "nvitop.select_devices",
+    "nvitop.parse_cuda_visible_devices",
+    "nvitop.normalize_cuda_visible_devices",
+    "nvitop.NVMLError",
+    "nvitop.colored",
+    "nvitop.NA",
+    "nvitop.Snapshot"
+  ]
+}

@@ -1,0 +1,99 @@
+---
+title: "Environment variables for nvitop configuration"
+description: "Configure nvitop's default display mode, GPU utilization thresholds, memory thresholds, and log level via environment variables in your shell startup file."
+---
+
+`nvitop` reads several environment variables at startup to configure its default behavior. Setting these in your shell startup file means you never have to pass the same flags on the command line every time you run the monitor.
+
+## Reference
+
+| Variable | Description | Valid values | Default |
+|----------|-------------|--------------|---------|
+| `NVITOP_MONITOR_MODE` | Default display mode (comma-separated string) | `auto` / `full` / `compact`<br />`plain` / `colorful`<br />`dark` / `light` | `auto,plain,dark` |
+| `NVITOP_GPU_UTILIZATION_THRESHOLDS` | Thresholds of GPU utilization that determine load intensity coloring | Two integers `th1,th2` where `1 ≤ th1 < th2 ≤ 99` | `10,75` |
+| `NVITOP_MEMORY_UTILIZATION_THRESHOLDS` | Thresholds of GPU memory percent that determine load intensity coloring | Two integers `th1,th2` where `1 ≤ th1 < th2 ≤ 99` | `10,80` |
+| `LOGLEVEL` | Log level for internal log messages | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` | `WARNING` |
+
+### `NVITOP_MONITOR_MODE`
+
+This variable accepts a comma-separated combination of up to three independent settings:
+
+- **Layout**: `auto` (adapt to terminal size), `full`, or `compact`
+- **Color style**: `plain` (default) or `colorful` (spectrum bar charts, requires 256-color terminal)
+- **Theme**: `dark` (default) or `light` (tweaks colors for light-background terminals)
+
+For example, `"full,colorful,light"` starts the monitor in full layout with spectrum-style bars on a light terminal.
+
+### Threshold variables
+
+Both `NVITOP_GPU_UTILIZATION_THRESHOLDS` and `NVITOP_MEMORY_UTILIZATION_THRESHOLDS` accept two comma-separated integers that define the boundaries between *light*, *moderate*, and *heavy* load coloring:
+
+```
+light < th1% ≤ moderate < th2% ≤ heavy
+```
+
+## Setting environment variables
+
+<CodeGroup>
+  ```bash Bash
+  # Add to ~/.bashrc
+  export NVITOP_MONITOR_MODE="full,light"
+  export NVITOP_GPU_UTILIZATION_THRESHOLDS="10,75"
+  export NVITOP_MEMORY_UTILIZATION_THRESHOLDS="10,80"
+  export LOGLEVEL="WARNING"
+  ```
+
+  ```zsh Zsh
+  # Add to ~/.zshrc
+  export NVITOP_MONITOR_MODE="full,light"
+  export NVITOP_GPU_UTILIZATION_THRESHOLDS="10,75"
+  export NVITOP_MEMORY_UTILIZATION_THRESHOLDS="10,80"
+  export LOGLEVEL="WARNING"
+  ```
+
+  ```fish Fish
+  # Add to ~/.config/fish/config.fish
+  set -gx NVITOP_MONITOR_MODE "full,light"
+  set -gx NVITOP_GPU_UTILIZATION_THRESHOLDS "10,75"
+  set -gx NVITOP_MEMORY_UTILIZATION_THRESHOLDS "10,80"
+  set -gx LOGLEVEL "WARNING"
+  ```
+
+  ```powershell PowerShell
+  # Add to $PROFILE.CurrentUserAllHosts
+  $Env:NVITOP_MONITOR_MODE = "full,light"
+  $Env:NVITOP_GPU_UTILIZATION_THRESHOLDS = "10,75"
+  $Env:NVITOP_MEMORY_UTILIZATION_THRESHOLDS = "10,80"
+  $Env:LOGLEVEL = "WARNING"
+  ```
+</CodeGroup>
+
+## Examples
+
+**Light terminal with compact layout:**
+
+```bash
+export NVITOP_MONITOR_MODE="compact,light"
+nvitop
+```
+
+**Colorful full-screen view (requires 256-color terminal):**
+
+```bash
+export TERM="xterm-256color"
+export NVITOP_MONITOR_MODE="full,colorful"
+nvitop
+```
+
+**Tighter thresholds — flag as heavy above 50% GPU or 60% memory:**
+
+```bash
+export NVITOP_GPU_UTILIZATION_THRESHOLDS="10,50"
+export NVITOP_MEMORY_UTILIZATION_THRESHOLDS="10,60"
+nvitop
+```
+
+<Note>
+  Command-line flags always take precedence over environment variables. For example,
+  running `nvitop -m compact` overrides `NVITOP_MONITOR_MODE` for that invocation only.
+</Note>
